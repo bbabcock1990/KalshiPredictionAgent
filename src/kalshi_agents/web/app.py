@@ -352,135 +352,134 @@ elif page == "🏠 Dashboard":
             progress_bar.progress(1.0, text="✅ Analysis complete!")
             console.update(label="🤖 Agent Console — complete", state="complete")
 
-                risk = RiskConfig(
-                    bankroll_usd=bankroll_override,
-                    max_stake_pct=s()["max_stake_pct"],
-                    kelly_fraction=s()["kelly_fraction"],
-                    min_edge=s()["min_edge"],
-                    min_confidence=s()["min_confidence"],
-                    max_spread_cents=s()["max_spread_cents"],
-                    min_minutes_to_close=s()["min_minutes_to_close"],
+            risk = RiskConfig(
+                bankroll_usd=bankroll_override,
+                max_stake_pct=s()["max_stake_pct"],
+                kelly_fraction=s()["kelly_fraction"],
+                min_edge=s()["min_edge"],
+                min_confidence=s()["min_confidence"],
+                max_spread_cents=s()["max_spread_cents"],
+                min_minutes_to_close=s()["min_minutes_to_close"],
+            )
+            engine = SizingEngine(risk)
+            decision = engine.decide(
+                ticker=ticker,
+                model_prob=report.p_yes,
+                confidence=report.confidence,
+                market=market,
+                orderbook=orderbook,
+                rationale=report.rationale,
+            )
+
+            # Log to calibration DB
+            data_dir = settings_store.SETTINGS_DIR / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            store = CalibrationStore(data_dir / "calibration.db")
+            store.log_prediction(decision.to_dict())
+
+            # Save to session history
+            st.session_state.signals_history.insert(0, decision.to_dict())
+
+            # Display result
+            st.divider()
+            if decision.signal == "GO":
+                st.success(f"## ✅ GO — Bet {decision.side}")
+                st.markdown(
+                    f"**Our AI agents found an edge.** They think the market is mispriced "
+                    f"and recommend betting **{decision.side}** with "
+                    f"**${decision.stake_usd:,.2f}** ({decision.contracts} contracts)."
                 )
-                engine = SizingEngine(risk)
-                decision = engine.decide(
-                    ticker=ticker,
-                    model_prob=report.p_yes,
-                    confidence=report.confidence,
-                    market=market,
-                    orderbook=orderbook,
-                    rationale=report.rationale,
+            else:
+                st.error(f"## ⛔ NO GO — Don't Bet")
+                st.markdown(
+                    "**No good bet here.** Our AI agents didn't find enough of an edge "
+                    "over the market price to justify a bet."
                 )
 
-                # Log to calibration DB
-                data_dir = settings_store.SETTINGS_DIR / "data"
-                data_dir.mkdir(parents=True, exist_ok=True)
-                store = CalibrationStore(data_dir / "calibration.db")
-                store.log_prediction(decision.to_dict())
+            st.markdown("---")
+            st.markdown("### 📊 What the AI Found")
 
-                # Save to session history
-                st.session_state.signals_history.insert(0, decision.to_dict())
+            r1, r2 = st.columns(2)
+            with r1:
+                pct_model = decision.model_prob * 100
+                st.metric("🤖 AI's Probability", f"{pct_model:.0f}%")
+                st.caption("What our AI agents think the chance of YES is, after debating the evidence.")
 
-                # Display result
-                st.divider()
-                if decision.signal == "GO":
-                    st.success(f"## ✅ GO — Bet {decision.side}")
-                    st.markdown(
-                        f"**Our AI agents found an edge.** They think the market is mispriced "
-                        f"and recommend betting **{decision.side}** with "
-                        f"**${decision.stake_usd:,.2f}** ({decision.contracts} contracts)."
-                    )
-                else:
-                    st.error(f"## ⛔ NO GO — Don't Bet")
-                    st.markdown(
-                        "**No good bet here.** Our AI agents didn't find enough of an edge "
-                        "over the market price to justify a bet."
-                    )
+            with r2:
+                pct_market = decision.market_prob * 100
+                st.metric("📈 Market's Probability", f"{pct_market:.0f}%")
+                st.caption("What other traders think — the current YES price on Kalshi.")
 
-                st.markdown("---")
-                st.markdown("### 📊 What the AI Found")
+            e1, e2 = st.columns(2)
+            with e1:
+                edge_pct = decision.edge * 100
+                edge_color = "🟢" if edge_pct > 0 else "🔴"
+                st.metric(f"{edge_color} Edge", f"{edge_pct:+.1f}%")
+                st.caption(
+                    "The gap between our AI's estimate and the market price. "
+                    "Positive = we think the market is wrong in our favor. "
+                    "Needs to be ≥5% for a GO signal."
+                )
 
-                r1, r2 = st.columns(2)
-                with r1:
-                    pct_model = decision.model_prob * 100
-                    st.metric("🤖 AI's Probability", f"{pct_model:.0f}%")
-                    st.caption("What our AI agents think the chance of YES is, after debating the evidence.")
+            with e2:
+                conf_pct = decision.confidence * 100
+                st.metric("🎯 Confidence", f"{conf_pct:.0f}%")
+                st.caption(
+                    "How sure our AI agents are about their probability estimate. "
+                    "Higher = more agreement between analysts. Needs ≥50% for a GO."
+                )
 
-                with r2:
-                    pct_market = decision.market_prob * 100
-                    st.metric("📈 Market's Probability", f"{pct_market:.0f}%")
-                    st.caption("What other traders think — the current YES price on Kalshi.")
-
-                e1, e2 = st.columns(2)
-                with e1:
-                    edge_pct = decision.edge * 100
-                    edge_color = "🟢" if edge_pct > 0 else "🔴"
-                    st.metric(f"{edge_color} Edge", f"{edge_pct:+.1f}%")
+            st.markdown("### 💰 Recommended Bet")
+            if decision.signal == "GO":
+                b1, b2, b3 = st.columns(3)
+                with b1:
+                    side_emoji = "👍" if decision.side == "YES" else "👎"
+                    st.metric(f"{side_emoji} Side", decision.side)
                     st.caption(
-                        "The gap between our AI's estimate and the market price. "
-                        "Positive = we think the market is wrong in our favor. "
-                        "Needs to be ≥5% for a GO signal."
+                        "Which side to bet on. **YES** = you think the event will happen. "
+                        "**NO** = you think it won't."
                     )
-
-                with e2:
-                    conf_pct = decision.confidence * 100
-                    st.metric("🎯 Confidence", f"{conf_pct:.0f}%")
+                with b2:
+                    st.metric("💵 Stake", f"${decision.stake_usd:,.2f}")
                     st.caption(
-                        "How sure our AI agents are about their probability estimate. "
-                        "Higher = more agreement between analysts. Needs ≥50% for a GO."
+                        f"How much to bet, based on your ${bankroll_override:,.0f} bankroll "
+                        "and conservative Kelly sizing (protects against overconfidence)."
                     )
-
-                st.markdown("### 💰 Recommended Bet")
-                if decision.signal == "GO":
-                    b1, b2, b3 = st.columns(3)
-                    with b1:
-                        side_emoji = "👍" if decision.side == "YES" else "👎"
-                        st.metric(f"{side_emoji} Side", decision.side)
-                        st.caption(
-                            "Which side to bet on. **YES** = you think the event will happen. "
-                            "**NO** = you think it won't."
-                        )
-                    with b2:
-                        st.metric("💵 Stake", f"${decision.stake_usd:,.2f}")
-                        st.caption(
-                            f"How much to bet, based on your ${bankroll_override:,.0f} bankroll "
-                            "and conservative Kelly sizing (protects against overconfidence)."
-                        )
-                    with b3:
-                        st.metric("📦 Contracts", decision.contracts)
-                        st.caption(
-                            "Number of contracts to buy at the current price. "
-                            "Each contract pays $1 if your side wins."
-                        )
-                else:
-                    st.info(
-                        "🚫 **No bet recommended.** The system didn't find a large enough "
-                        "edge to justify risking money. See the reasons below."
+                with b3:
+                    st.metric("📦 Contracts", decision.contracts)
+                    st.caption(
+                        "Number of contracts to buy at the current price. "
+                        "Each contract pays $1 if your side wins."
                     )
+            else:
+                st.info(
+                    "🚫 **No bet recommended.** The system didn't find a large enough "
+                    "edge to justify risking money. See the reasons below."
+                )
 
-                if decision.reasons_blocked:
-                    st.markdown("### ⚠️ Why NO GO")
-                    for reason in decision.reasons_blocked:
-                        # Make reasons human-readable
-                        if "edge" in reason:
-                            st.warning(f"📉 **Not enough edge** — {reason}")
-                        elif "confidence" in reason:
-                            st.warning(f"🤷 **Too uncertain** — {reason}")
-                        elif "spread" in reason:
-                            st.warning(f"💸 **Market too thin** — {reason}")
-                        elif "close" in reason or "min" in reason.lower():
-                            st.warning(f"⏰ **Too close to closing** — {reason}")
-                        elif "stake" in reason:
-                            st.warning(f"📦 **Bet too small** — {reason}")
-                        else:
-                            st.warning(f"⚠️ {reason}")
+            if decision.reasons_blocked:
+                st.markdown("### ⚠️ Why NO GO")
+                for reason in decision.reasons_blocked:
+                    if "edge" in reason:
+                        st.warning(f"📉 **Not enough edge** — {reason}")
+                    elif "confidence" in reason:
+                        st.warning(f"🤷 **Too uncertain** — {reason}")
+                    elif "spread" in reason:
+                        st.warning(f"💸 **Market too thin** — {reason}")
+                    elif "close" in reason or "min" in reason.lower():
+                        st.warning(f"⏰ **Too close to closing** — {reason}")
+                    elif "stake" in reason:
+                        st.warning(f"📦 **Bet too small** — {reason}")
+                    else:
+                        st.warning(f"⚠️ {reason}")
 
-                with st.expander("📝 AI Agent Rationale (detailed)", expanded=False):
-                    st.write(decision.rationale)
+            with st.expander("📝 AI Agent Rationale (detailed)", expanded=False):
+                st.write(decision.rationale)
 
-            except Exception as e:
-                st.error(f"Pipeline error: {e}")
-                import traceback
-                st.code(traceback.format_exc())
+        except Exception as e:
+            st.error(f"Pipeline error: {e}")
+            import traceback
+            st.code(traceback.format_exc())
 
 
 # ===================================================================
