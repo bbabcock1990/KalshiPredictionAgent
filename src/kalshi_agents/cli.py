@@ -123,5 +123,22 @@ def signal(
     console.print(f"[dim]{decision.rationale}[/]")
 
 
+@app.command()
+def web(
+    port: int = typer.Option(8501, help="Port for the Streamlit server."),
+) -> None:
+    """Launch the Streamlit web dashboard."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    app_path = Path(__file__).parent / "web" / "app.py"
+    console.print(f"[bold]Starting Kalshi Agents dashboard on http://localhost:{port}[/]")
+    subprocess.run(
+        [sys.executable, "-m", "streamlit", "run", str(app_path),
+         "--server.port", str(port), "--server.headless", "true"],
+    )
+
+
 if __name__ == "__main__":
     app()

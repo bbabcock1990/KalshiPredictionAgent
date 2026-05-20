@@ -17,6 +17,7 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "python-dotenv>=1.0",
+    "streamlit>=1.35",
     "tradingagents @ git+https://github.com/bbabcock1990/TradingAgents.git",
 ]
 
