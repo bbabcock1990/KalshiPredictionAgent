@@ -147,11 +147,7 @@ elif page == "🏠 Dashboard":
         )
 
     # --- Market lookup ---
-    # If a market was selected from the browser, set it in widget state
-    if "selected_ticker" in st.session_state:
-        st.session_state["ticker_input"] = st.session_state.pop("selected_ticker")
-        st.session_state["auto_fetch"] = True
-
+    # auto_fetch is set by the browse button callback
     col_input, col_btn = st.columns([3, 1])
     with col_input:
         ticker = st.text_input(
@@ -252,6 +248,11 @@ elif page == "🏠 Dashboard":
                         st.warning("No open markets found. Try a different filter.")
                     else:
                         st.markdown(f"**{len(found)} market(s) found**")
+
+                        def _select(t):
+                            st.session_state["ticker_input"] = t
+                            st.session_state["auto_fetch"] = True
+
                         for m in found[:30]:
                             bid = m.get("yes_bid_dollars") or "—"
                             ask = m.get("yes_ask_dollars") or "—"
@@ -260,14 +261,14 @@ elif page == "🏠 Dashboard":
                             cat = m.get("category") or ""
                             cat_badge = f" `{cat}`" if cat else ""
 
-                            if st.button(
+                            st.button(
                                 f"**{title}**{cat_badge}\n"
                                 f"`{m['ticker']}` · YES {bid}/{ask} · vol {vol}",
                                 key=f"browse_{m['ticker']}",
                                 use_container_width=True,
-                            ):
-                                st.session_state["selected_ticker"] = m["ticker"]
-                                st.rerun()
+                                on_click=_select,
+                                args=(m["ticker"],),
+                            )
                 except Exception as e:
                     st.error(f"Error searching: {e}")
 
