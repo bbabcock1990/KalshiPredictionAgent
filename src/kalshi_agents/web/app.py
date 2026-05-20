@@ -84,7 +84,52 @@ if page == "⚙️ Settings":
         providers = ["github-copilot", "openai", "anthropic", "google", "deepseek"]
         idx = providers.index(settings["llm_provider"]) if settings["llm_provider"] in providers else 0
         settings["llm_provider"] = st.selectbox("Provider", providers, index=idx)
-        settings["llm_model"] = st.text_input("Model", value=settings["llm_model"])
+
+        # Fetch available models from the proxy
+        available_models = []
+        backend = settings.get("backend_url", "http://localhost:4141/v1")
+        try:
+            models_url = backend.rstrip("/")
+            if not models_url.endswith("/models"):
+                models_url += "/models"
+            r = httpx.get(models_url, timeout=3)
+            if r.status_code == 200:
+                data = r.json()
+                model_list = data.get("data", [])
+                available_models = sorted(
+                    [m.get("id", "") for m in model_list if m.get("id")],
+                    key=lambda x: (
+                        0 if "gpt" in x.lower() else
+                        1 if "claude" in x.lower() else
+                        2 if "gemini" in x.lower() else 3,
+                        x,
+                    ),
+                )
+        except Exception:
+            pass
+
+        if available_models:
+            # Filter to models likely to support tool calling
+            current = settings["llm_model"]
+            if current in available_models:
+                default_idx = available_models.index(current)
+            else:
+                # Default to gpt-4o-mini if available, else first
+                default_idx = next(
+                    (i for i, m in enumerate(available_models) if "gpt-4o-mini" in m), 0
+                )
+            settings["llm_model"] = st.selectbox(
+                "Model",
+                available_models,
+                index=default_idx,
+                help="Models pulled live from your LLM proxy. Not all models support tool-calling.",
+            )
+        else:
+            settings["llm_model"] = st.text_input(
+                "Model", value=settings["llm_model"],
+                help="Could not fetch models from proxy. Type a model name manually.",
+            )
+
         settings["backend_url"] = st.text_input(
             "Backend URL",
             value=settings["backend_url"],
