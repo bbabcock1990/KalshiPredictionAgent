@@ -147,15 +147,23 @@ elif page == "🏠 Dashboard":
         )
 
     # --- Market lookup ---
+    # If a market was selected from the browser, pre-fill the ticker input
+    default_ticker = st.session_state.pop("selected_ticker", "")
+
     col_input, col_btn = st.columns([3, 1])
     with col_input:
         ticker = st.text_input(
             "Kalshi Ticker",
+            value=default_ticker,
             placeholder="e.g. KXFEDDECISION-28JAN-H0",
             label_visibility="collapsed",
         )
     with col_btn:
         fetch_clicked = st.button("🔍 Fetch Market", use_container_width=True)
+
+    # Auto-fetch when a market was selected from the browser
+    if default_ticker and not fetch_clicked:
+        fetch_clicked = True
 
     # --- Market browser ---
     CATEGORIES = [
@@ -260,11 +268,6 @@ elif page == "🏠 Dashboard":
                                 st.rerun()
                 except Exception as e:
                     st.error(f"Error searching: {e}")
-
-    # Use selected ticker from browser if available
-    if not ticker and "selected_ticker" in st.session_state:
-        ticker = st.session_state.pop("selected_ticker")
-        fetch_clicked = True  # auto-fetch when selected from browser
 
     ticker = ticker.strip() if ticker else ""
 
