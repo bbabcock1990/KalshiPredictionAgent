@@ -461,15 +461,52 @@ elif page == "🏠 Dashboard":
                 st.markdown("### ⚠️ Why NO GO")
                 for reason in decision.reasons_blocked:
                     if "edge" in reason:
-                        st.warning(f"📉 **Not enough edge** — {reason}")
+                        st.warning(
+                            f"📉 **Not enough edge**\n\n"
+                            f"Our AI's probability ({decision.model_prob*100:.0f}%) is too close "
+                            f"to the market price ({decision.market_prob*100:.0f}%). The gap "
+                            f"({decision.edge*100:+.1f}%) needs to be at least "
+                            f"{s()['min_edge']*100:.0f}% to justify a bet. When the AI agrees "
+                            f"with the market, there's no money to be made."
+                        )
                     elif "confidence" in reason:
-                        st.warning(f"🤷 **Too uncertain** — {reason}")
+                        st.warning(
+                            f"🤷 **Too uncertain**\n\n"
+                            f"Our AI agents only have {decision.confidence*100:.0f}% confidence "
+                            f"in their estimate. This means the analysts disagreed with each "
+                            f"other or the evidence was weak. We need at least "
+                            f"{s()['min_confidence']*100:.0f}% confidence to risk real money."
+                        )
                     elif "spread" in reason:
-                        st.warning(f"💸 **Market too thin** — {reason}")
+                        st.warning(
+                            f"💸 **Market too thin (wide spread)**\n\n"
+                            f"The spread is {market.spread_cents}¢ — that's the gap between "
+                            f"what buyers are willing to pay and what sellers are asking. "
+                            f"A wide spread means fewer people are trading this market, so "
+                            f"you'd lose money just entering and exiting the position. "
+                            f"We need the spread to be {s()['max_spread_cents']}¢ or less."
+                        )
                     elif "close" in reason or "min" in reason.lower():
-                        st.warning(f"⏰ **Too close to closing** — {reason}")
+                        st.warning(
+                            f"⏰ **Too close to closing**\n\n"
+                            f"This market closes soon. Near-expiry markets can be volatile "
+                            f"and hard to exit. We require at least "
+                            f"{s()['min_minutes_to_close']} minutes before close."
+                        )
                     elif "stake" in reason:
-                        st.warning(f"📦 **Bet too small** — {reason}")
+                        st.warning(
+                            f"📦 **Bet too small**\n\n"
+                            f"After applying our risk limits, the recommended bet size is "
+                            f"less than the cost of a single contract. This usually happens "
+                            f"when the edge is tiny or the bankroll is small relative to the "
+                            f"contract price."
+                        )
+                    elif "status" in reason:
+                        st.warning(
+                            f"🔒 **Market not open**\n\n"
+                            f"This market's status is '{market.status}' — it may be closed, "
+                            f"settled, or not yet open for trading."
+                        )
                     else:
                         st.warning(f"⚠️ {reason}")
 
