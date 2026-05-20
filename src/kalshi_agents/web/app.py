@@ -281,24 +281,76 @@ elif page == "🏠 Dashboard":
         )
 
     if run_clicked:
-        with st.spinner("🤖 Running TradingAgents debate... (1-3 minutes)"):
-            try:
-                from tradingagents.default_config import DEFAULT_CONFIG
+        # --- Node-to-stage mapping for progress bar ---
+        NODE_INFO = {
+            "Market Analyst":        ("📊 Analyzing market microstructure...", 0.07),
+            "tools_market":          ("📊 Fetching orderbook data...", 0.10),
+            "Msg Clear Market":      ("✅ Market analysis complete", 0.13),
+            "Sentiment Analyst":     ("📡 Assessing public signals & consensus...", 0.20),
+            "tools_social":          ("📡 Fetching signal data...", 0.22),
+            "Msg Clear Sentiment":   ("✅ Public signal analysis complete", 0.25),
+            "News Analyst":          ("📰 Searching for relevant news...", 0.33),
+            "tools_news":            ("📰 Fetching news articles...", 0.37),
+            "Msg Clear News":        ("✅ News analysis complete", 0.40),
+            "Fundamentals Analyst":  ("📈 Analyzing base rates & fundamentals...", 0.47),
+            "tools_fundamentals":    ("📈 Fetching economic data...", 0.50),
+            "Msg Clear Fundamentals":("✅ Base rate analysis complete", 0.53),
+            "Bull Researcher":       ("🟢 YES Researcher making the case for YES...", 0.60),
+            "Bear Researcher":       ("🔴 NO Researcher making the case for NO...", 0.67),
+            "Research Manager":      ("🧠 Research Manager synthesizing the debate...", 0.73),
+            "Trader":                ("💼 Trader forming a position proposal...", 0.78),
+            "Aggressive Analyst":    ("⚡ Risk team: Aggressive analyst...", 0.82),
+            "Conservative Analyst":  ("🛡️ Risk team: Conservative analyst...", 0.86),
+            "Neutral Analyst":       ("⚖️ Risk team: Neutral analyst...", 0.90),
+            "Portfolio Manager":     ("👔 Portfolio Manager making final decision...", 0.95),
+            "__extracting_probability__": ("🎯 Extracting probability estimate...", 0.98),
+        }
 
-                from kalshi_agents.agents.kalshi_graph import run_kalshi_agents
-                from kalshi_agents.config import RiskConfig
-                from kalshi_agents.decision.sizing import SizingEngine
-                from kalshi_agents.storage.db import CalibrationStore
+        # Report keys that contain the readable agent output
+        REPORT_KEYS = [
+            "market_report", "sentiment_report", "news_report",
+            "fundamentals_report", "investment_plan",
+            "trader_investment_plan", "final_trade_decision",
+        ]
 
-                ta_config = {**DEFAULT_CONFIG}
-                ta_config["llm_provider"] = s()["llm_provider"]
-                ta_config["backend_url"] = s()["backend_url"]
-                ta_config["deep_think_llm"] = s()["llm_model"]
-                ta_config["quick_think_llm"] = s()["llm_model"]
-                ta_config["max_debate_rounds"] = 1
-                ta_config["max_risk_discuss_rounds"] = 1
+        progress_bar = st.progress(0, text="Starting AI agents...")
+        console = st.status("🤖 Agent Console — click to expand", expanded=False)
 
-                report = run_kalshi_agents(market, orderbook, config=ta_config)
+        def on_progress(node_name, node_output):
+            label, pct = NODE_INFO.get(node_name, (node_name, None))
+            if pct:
+                progress_bar.progress(pct, text=label)
+            console.write(f"**{label}**")
+            # Show report content if available
+            for key in REPORT_KEYS:
+                val = node_output.get(key, "")
+                if val and isinstance(val, str) and len(val) > 20:
+                    preview = val[:500].replace("\n", " ")
+                    console.caption(f"_{preview}{'...' if len(val) > 500 else ''}_")
+
+        try:
+            from tradingagents.default_config import DEFAULT_CONFIG
+
+            from kalshi_agents.agents.kalshi_graph import run_kalshi_agents
+            from kalshi_agents.config import RiskConfig
+            from kalshi_agents.decision.sizing import SizingEngine
+            from kalshi_agents.storage.db import CalibrationStore
+
+            ta_config = {**DEFAULT_CONFIG}
+            ta_config["llm_provider"] = s()["llm_provider"]
+            ta_config["backend_url"] = s()["backend_url"]
+            ta_config["deep_think_llm"] = s()["llm_model"]
+            ta_config["quick_think_llm"] = s()["llm_model"]
+            ta_config["max_debate_rounds"] = 1
+            ta_config["max_risk_discuss_rounds"] = 1
+
+            report = run_kalshi_agents(
+                market, orderbook, config=ta_config,
+                progress_callback=on_progress,
+            )
+
+            progress_bar.progress(1.0, text="✅ Analysis complete!")
+            console.update(label="🤖 Agent Console — complete", state="complete")
 
                 risk = RiskConfig(
                     bankroll_usd=bankroll_override,

@@ -564,8 +564,16 @@ class KalshiTradingGraph:
         self,
         market: Market,
         orderbook: OrderbookSnapshot | None = None,
+        progress_callback=None,
     ) -> AgentReport:
         """Run the full TradingAgents pipeline on a Kalshi event market.
+
+        Args:
+            market: Kalshi market snapshot.
+            orderbook: Kalshi orderbook snapshot.
+            progress_callback: Optional ``fn(node_name, node_output)`` called
+                after every graph node completes.  Used by the dashboard for
+                live progress tracking.
 
         Returns an AgentReport with p_yes, confidence, and rationale.
         """
@@ -612,13 +620,30 @@ class KalshiTradingGraph:
         }
 
         logger.info("Running TradingAgents on %s (%s)", market.ticker, market.title)
+        graph_config = {"recursion_limit": self.config.get("max_recur_limit", 100)}
 
-        if self.debug:
+        final_decision = ""
+
+        if progress_callback:
+            # Stream mode — yields node-by-node updates for progress tracking
+            for event in self.graph.stream(
+                init_state,
+                stream_mode="updates",
+                config=graph_config,
+            ):
+                for node_name, node_output in event.items():
+                    try:
+                        progress_callback(node_name, node_output)
+                    except Exception:
+                        pass
+                    if "final_trade_decision" in node_output:
+                        final_decision = node_output["final_trade_decision"]
+        elif self.debug:
             trace = []
             for chunk in self.graph.stream(
                 init_state,
                 stream_mode="values",
-                config={"recursion_limit": self.config.get("max_recur_limit", 100)},
+                config=graph_config,
             ):
                 if chunk.get("messages"):
                     chunk["messages"][-1].pretty_print()
@@ -626,17 +651,24 @@ class KalshiTradingGraph:
             final_state = {}
             for chunk in trace:
                 final_state.update(chunk)
+            final_decision = final_state.get("final_trade_decision", "")
         else:
             final_state = self.graph.invoke(
                 init_state,
                 stream_mode="values",
-                config={"recursion_limit": self.config.get("max_recur_limit", 100)},
+                config=graph_config,
             )
+            final_decision = final_state.get("final_trade_decision", "")
 
-        final_decision = final_state.get("final_trade_decision", "")
         logger.info("TA decision text: %s", final_decision[:200])
 
         # Extract probability from the full decision
+        if progress_callback:
+            try:
+                progress_callback("__extracting_probability__", {})
+            except Exception:
+                pass
+
         prob = extract_probability(
             self.quick_thinking_llm, final_decision, market
         )
@@ -686,10 +718,11 @@ def run_kalshi_agents(
     orderbook: OrderbookSnapshot | None,
     config: Dict[str, Any] | None = None,
     debug: bool = False,
+    progress_callback=None,
 ) -> AgentReport:
     """Top-level entry point: run TradingAgents on a Kalshi market.
 
     Creates the graph, runs the full pipeline, extracts a probability estimate.
     """
     graph = KalshiTradingGraph(config=config, debug=debug)
-    return graph.analyze_event(market, orderbook)
+    return graph.analyze_event(market, orderbook, progress_callback=progress_callback)
