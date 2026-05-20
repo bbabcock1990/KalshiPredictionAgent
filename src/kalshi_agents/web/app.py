@@ -47,7 +47,10 @@ with st.sidebar:
 
     # copilot-api health check
     try:
-        r = httpx.get(f"{s()['backend_url'].rstrip('/v1')}/v1/models", timeout=2)
+        check_url = s()["backend_url"]
+        if not check_url.endswith("/models"):
+            check_url = check_url.rstrip("/") + "/models"
+        r = httpx.get(check_url, timeout=2)
         st.success("LLM proxy ✓", icon="🟢")
     except Exception:
         st.error("LLM proxy offline", icon="🔴")
@@ -187,9 +190,16 @@ elif page == "🏠 Dashboard":
     # Use selected ticker from browser if available
     if not ticker and "selected_ticker" in st.session_state:
         ticker = st.session_state.pop("selected_ticker")
+        fetch_clicked = True  # auto-fetch when selected from browser
+
+    ticker = ticker.strip() if ticker else ""
 
     if not ticker:
         st.info("Enter a Kalshi ticker above or browse by series to get started.")
+        st.stop()
+
+    if not fetch_clicked and "current_market" not in st.session_state:
+        st.info("Enter a ticker and click **🔍 Fetch Market** to load it.")
         st.stop()
 
     # --- Fetch market data ---
@@ -203,13 +213,23 @@ elif page == "🏠 Dashboard":
         private_key_path=s()["kalshi_private_key_path"] or None,
     )
 
-    try:
-        with KalshiClient(kalshi_cfg) as client:
-            market = client.get_market(ticker)
-            orderbook = client.get_orderbook(ticker)
-    except Exception as e:
-        st.error(f"Failed to fetch market: {e}")
-        st.stop()
+    if fetch_clicked or st.session_state.get("current_ticker") != ticker:
+        try:
+            with KalshiClient(kalshi_cfg) as client:
+                market = client.get_market(ticker)
+                orderbook = client.get_orderbook(ticker)
+            st.session_state["current_market"] = market
+            st.session_state["current_orderbook"] = orderbook
+            st.session_state["current_ticker"] = ticker
+        except Exception as e:
+            st.error(f"Failed to fetch market: {e}")
+            st.stop()
+    else:
+        market = st.session_state.get("current_market")
+        orderbook = st.session_state.get("current_orderbook")
+        if not market:
+            st.info("Click **🔍 Fetch Market** to load market data.")
+            st.stop()
 
     # --- Market info card ---
     st.subheader(f"📈 {market.title}")
@@ -311,25 +331,92 @@ elif page == "🏠 Dashboard":
                 # Display result
                 st.divider()
                 if decision.signal == "GO":
-                    st.success(f"## ✅ GO — {decision.side}", icon="🟢")
+                    st.success(f"## ✅ GO — Bet {decision.side}")
+                    st.markdown(
+                        f"**Our AI agents found an edge.** They think the market is mispriced "
+                        f"and recommend betting **{decision.side}** with "
+                        f"**${decision.stake_usd:,.2f}** ({decision.contracts} contracts)."
+                    )
                 else:
-                    st.warning(f"## ⛔ NO GO", icon="🔴")
+                    st.error(f"## ⛔ NO GO — Don't Bet")
+                    st.markdown(
+                        "**No good bet here.** Our AI agents didn't find enough of an edge "
+                        "over the market price to justify a bet."
+                    )
 
-                r1, r2, r3, r4 = st.columns(4)
-                r1.metric("Model P(YES)", f"{decision.model_prob:.3f}")
-                r2.metric("Market P(YES)", f"{decision.market_prob:.3f}")
-                r3.metric("Edge", f"{decision.edge:+.3f}")
-                r4.metric("Confidence", f"{decision.confidence:.2f}")
+                st.markdown("---")
+                st.markdown("### 📊 What the AI Found")
 
-                s1, s2, s3 = st.columns(3)
-                s1.metric("Side", decision.side)
-                s2.metric("Stake", f"${decision.stake_usd:,.2f}")
-                s3.metric("Contracts", decision.contracts)
+                r1, r2 = st.columns(2)
+                with r1:
+                    pct_model = decision.model_prob * 100
+                    st.metric("🤖 AI's Probability", f"{pct_model:.0f}%")
+                    st.caption("What our AI agents think the chance of YES is, after debating the evidence.")
+
+                with r2:
+                    pct_market = decision.market_prob * 100
+                    st.metric("📈 Market's Probability", f"{pct_market:.0f}%")
+                    st.caption("What other traders think — the current YES price on Kalshi.")
+
+                e1, e2 = st.columns(2)
+                with e1:
+                    edge_pct = decision.edge * 100
+                    edge_color = "🟢" if edge_pct > 0 else "🔴"
+                    st.metric(f"{edge_color} Edge", f"{edge_pct:+.1f}%")
+                    st.caption(
+                        "The gap between our AI's estimate and the market price. "
+                        "Positive = we think the market is wrong in our favor. "
+                        "Needs to be ≥5% for a GO signal."
+                    )
+
+                with e2:
+                    conf_pct = decision.confidence * 100
+                    st.metric("🎯 Confidence", f"{conf_pct:.0f}%")
+                    st.caption(
+                        "How sure our AI agents are about their probability estimate. "
+                        "Higher = more agreement between analysts. Needs ≥50% for a GO."
+                    )
+
+                st.markdown("### 💰 Recommended Bet")
+                b1, b2, b3 = st.columns(3)
+                with b1:
+                    side_emoji = "👍" if decision.side == "YES" else "👎"
+                    st.metric(f"{side_emoji} Side", decision.side)
+                    st.caption(
+                        "Which side to bet on. **YES** = you think the event will happen. "
+                        "**NO** = you think it won't."
+                    )
+                with b2:
+                    st.metric("💵 Stake", f"${decision.stake_usd:,.2f}")
+                    st.caption(
+                        f"How much to bet, based on your ${bankroll_override:,.0f} bankroll "
+                        "and conservative Kelly sizing (protects against overconfidence)."
+                    )
+                with b3:
+                    st.metric("📦 Contracts", decision.contracts)
+                    st.caption(
+                        "Number of contracts to buy at the current price. "
+                        "Each contract pays $1 if your side wins."
+                    )
 
                 if decision.reasons_blocked:
-                    st.warning("**Blocked:** " + " · ".join(decision.reasons_blocked))
+                    st.markdown("### ⚠️ Why NO GO")
+                    for reason in decision.reasons_blocked:
+                        # Make reasons human-readable
+                        if "edge" in reason:
+                            st.warning(f"📉 **Not enough edge** — {reason}")
+                        elif "confidence" in reason:
+                            st.warning(f"🤷 **Too uncertain** — {reason}")
+                        elif "spread" in reason:
+                            st.warning(f"💸 **Market too thin** — {reason}")
+                        elif "close" in reason or "min" in reason.lower():
+                            st.warning(f"⏰ **Too close to closing** — {reason}")
+                        elif "stake" in reason:
+                            st.warning(f"📦 **Bet too small** — {reason}")
+                        else:
+                            st.warning(f"⚠️ {reason}")
 
-                with st.expander("📝 Agent Rationale", expanded=True):
+                with st.expander("📝 AI Agent Rationale (detailed)", expanded=False):
                     st.write(decision.rationale)
 
             except Exception as e:
