@@ -8,13 +8,27 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import config as cfg
-from .agents.graph import run as run_agents
+from .agents.kalshi_graph import run_kalshi_agents
 from .decision.sizing import SizingEngine
 from .kalshi.client import KalshiClient
 from .storage.db import CalibrationStore
 
 app = typer.Typer(help="kalshi-agents — multi-agent buy/no-buy signals for Kalshi.")
 console = Console()
+
+
+def _build_ta_config(c: cfg.AppConfig) -> dict:
+    """Convert our AppConfig into a TradingAgents config dict."""
+    from tradingagents.default_config import DEFAULT_CONFIG
+
+    ta = {**DEFAULT_CONFIG}
+    ta["llm_provider"] = "github-copilot"
+    ta["backend_url"] = "http://localhost:4141/v1"
+    ta["deep_think_llm"] = c.llm.model
+    ta["quick_think_llm"] = c.llm.model
+    ta["max_debate_rounds"] = 1
+    ta["max_risk_discuss_rounds"] = 1
+    return ta
 
 
 @app.command()
@@ -25,7 +39,8 @@ def market(ticker: str) -> None:
         m = k.get_market(ticker)
         ob = k.get_orderbook(ticker)
     table = Table(title=f"{m.ticker} — {m.title}")
-    table.add_column("field"); table.add_column("value")
+    table.add_column("field")
+    table.add_column("value")
     table.add_row("status", m.status)
     table.add_row("yes_bid / yes_ask", f"{m.yes_bid:.2f} / {m.yes_ask:.2f}")
     table.add_row("spread", f"{m.spread_cents}¢")
@@ -44,12 +59,13 @@ def signal(
     ticker: str,
     bankroll: float | None = typer.Option(None, help="Override BANKROLL_USD."),
     json_out: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+    debug: bool = typer.Option(False, "--debug", help="Show agent debate output."),
 ) -> None:
-    """Run the agent panel and emit a GO / NO_GO decision with stake size."""
+    """Run the TradingAgents panel on a Kalshi market and emit GO / NO_GO."""
     c = cfg.load()
     if bankroll is not None:
-        # Override at runtime
         from dataclasses import replace
+
         c = cfg.AppConfig(
             risk=replace(c.risk, bankroll_usd=bankroll),
             kalshi=c.kalshi,
@@ -57,23 +73,32 @@ def signal(
             data_dir=c.data_dir,
         )
 
+    console.print(f"[dim]Fetching market data for {ticker}...[/]")
     with KalshiClient(c.kalshi) as k:
-        market = k.get_market(ticker)
+        mkt = k.get_market(ticker)
         orderbook = k.get_orderbook(ticker)
 
-    report = run_agents(market, orderbook)
+    console.print(
+        f"[dim]Market: {mkt.title}  |  YES={mkt.yes_mid:.2f}  "
+        f"spread={mkt.spread_cents}¢  vol={mkt.volume}[/]"
+    )
+    console.print("[dim]Running TradingAgents debate (this may take 1-3 minutes)...[/]")
+
+    ta_config = _build_ta_config(c)
+    report = run_kalshi_agents(mkt, orderbook, config=ta_config, debug=debug)
+
     engine = SizingEngine(c.risk)
     decision = engine.decide(
         ticker=ticker,
         model_prob=report.p_yes,
         confidence=report.confidence,
-        market=market,
+        market=mkt,
         orderbook=orderbook,
         rationale=report.rationale,
     )
 
     store = CalibrationStore(c.data_dir / "calibration.db")
-    store.log_prediction(decision.to_dict(), extra={"analysts": [a.model_dump() for a in report.analyst_outputs]})
+    store.log_prediction(decision.to_dict())
 
     if json_out:
         console.print_json(json.dumps(decision.to_dict()))
@@ -92,7 +117,9 @@ def signal(
         )
     )
     if decision.reasons_blocked:
-        console.print("[yellow]Blocked because:[/] " + "; ".join(decision.reasons_blocked))
+        console.print(
+            "[yellow]Blocked because:[/] " + "; ".join(decision.reasons_blocked)
+        )
     console.print(f"[dim]{decision.rationale}[/]")
 
 

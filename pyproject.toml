@@ -17,14 +17,10 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "python-dotenv>=1.0",
+    "tradingagents @ git+https://github.com/bbabcock1990/TradingAgents.git",
 ]
 
 [project.optional-dependencies]
-agents = [
-    "langgraph>=0.2",
-    "langchain>=0.2",
-    "langchain-openai>=0.1",
-]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
