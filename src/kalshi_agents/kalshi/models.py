@@ -45,9 +45,22 @@ class Market(BaseModel):
 
     @classmethod
     def from_kalshi(cls, raw: dict[str, Any]) -> "Market":
-        # Kalshi returns prices in **cents** (0–100). Normalize to probability.
-        def cents(v: Any) -> float:
-            return (float(v) / 100.0) if v is not None else 0.0
+        # Kalshi historically returned integer cents (yes_bid=54). Newer responses
+        # use string-decimal "_dollars" fields (yes_bid_dollars="0.5400"). Support both.
+        def to_prob(raw_dict: dict, base: str) -> float:
+            dollars = raw_dict.get(f"{base}_dollars")
+            if dollars not in (None, ""):
+                try:
+                    return float(dollars)
+                except (TypeError, ValueError):
+                    pass
+            cents = raw_dict.get(base)
+            if cents in (None, ""):
+                return 0.0
+            try:
+                return float(cents) / 100.0
+            except (TypeError, ValueError):
+                return 0.0
 
         close = raw.get("close_time")
         close_dt = None
@@ -57,17 +70,31 @@ class Market(BaseModel):
             except ValueError:
                 close_dt = None
 
+        yes_bid = to_prob(raw, "yes_bid")
+        yes_ask = to_prob(raw, "yes_ask") or yes_bid
+        last_price = to_prob(raw, "last_price") or None
+
+        def to_int(d: dict, *keys: str) -> int:
+            for k in keys:
+                v = d.get(k)
+                if v not in (None, ""):
+                    try:
+                        return int(float(v))
+                    except (TypeError, ValueError):
+                        continue
+            return 0
+
         return cls(
             ticker=raw["ticker"],
             event_ticker=raw.get("event_ticker"),
             title=raw.get("title", raw["ticker"]),
-            subtitle=raw.get("subtitle"),
+            subtitle=raw.get("subtitle") or raw.get("yes_sub_title"),
             status=raw.get("status", "unknown"),
-            yes_bid=cents(raw.get("yes_bid")),
-            yes_ask=cents(raw.get("yes_ask")) or cents(raw.get("yes_bid")),
-            last_price=cents(raw.get("last_price")) if raw.get("last_price") else None,
-            volume=int(raw.get("volume", 0) or 0),
-            open_interest=int(raw.get("open_interest", 0) or 0),
+            yes_bid=yes_bid,
+            yes_ask=yes_ask,
+            last_price=last_price,
+            volume=to_int(raw, "volume", "volume_fp"),
+            open_interest=to_int(raw, "open_interest", "open_interest_fp"),
             close_time=close_dt,
             rules_primary=raw.get("rules_primary"),
             category=raw.get("category"),
@@ -100,12 +127,21 @@ class OrderbookSnapshot(BaseModel):
         def lvls(side: str) -> list[OrderbookLevel]:
             out = []
             for entry in ob.get(side, []) or []:
-                # Kalshi: [price_cents, quantity]
                 if not entry:
                     continue
-                price_cents, qty = entry[0], entry[1]
-                out.append(OrderbookLevel(price=price_cents / 100.0, quantity=int(qty)))
-            # Best bid first (highest price)
+                # Two formats: legacy [price_cents:int, qty:int]
+                # newer:        [price_dollars:str|float, qty:int]
+                raw_price, qty = entry[0], entry[1]
+                if isinstance(raw_price, str):
+                    price = float(raw_price)
+                elif isinstance(raw_price, (int,)) and raw_price > 1:
+                    # cents
+                    price = raw_price / 100.0
+                else:
+                    price = float(raw_price)
+                    if price > 1.0:
+                        price = price / 100.0
+                out.append(OrderbookLevel(price=price, quantity=int(qty)))
             out.sort(key=lambda x: x.price, reverse=True)
             return out
 

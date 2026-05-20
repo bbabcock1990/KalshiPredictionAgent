@@ -108,7 +108,7 @@ class SizingEngine:
             blocked.append(
                 f"{mtc:.0f}min to close < min {self.risk.min_minutes_to_close}"
             )
-        if market.status != "open":
+        if market.status not in ("open", "active"):
             blocked.append(f"market status={market.status}")
 
         # Sizing

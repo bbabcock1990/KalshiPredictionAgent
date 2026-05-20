@@ -20,6 +20,29 @@ def test_market_from_kalshi_normalizes_cents_to_probability():
     assert abs(m.yes_mid - 0.555) < 1e-9
 
 
+def test_market_from_kalshi_accepts_dollars_format():
+    """Newer Kalshi payloads use *_dollars string fields and *_fp volumes."""
+    m = Market.from_kalshi(
+        {
+            "ticker": "KXFEDDECISION-28JAN-H0",
+            "title": "Will the Fed hike 0bps?",
+            "status": "active",
+            "yes_bid_dollars": "0.6700",
+            "yes_ask_dollars": "0.7000",
+            "last_price_dollars": "0.6800",
+            "volume_fp": "1343.00",
+            "open_interest_fp": "374.00",
+            "close_time": "2030-01-01T00:00:00Z",
+        }
+    )
+    assert m.yes_bid == 0.67
+    assert m.yes_ask == 0.70
+    assert m.last_price == 0.68
+    assert m.volume == 1343
+    assert m.open_interest == 374
+    assert m.spread_cents == 3
+
+
 def test_orderbook_from_kalshi_sorts_levels():
     raw = {
         "orderbook": {
