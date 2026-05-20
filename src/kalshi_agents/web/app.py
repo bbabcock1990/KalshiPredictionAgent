@@ -378,25 +378,31 @@ elif page == "🏠 Dashboard":
                     )
 
                 st.markdown("### 💰 Recommended Bet")
-                b1, b2, b3 = st.columns(3)
-                with b1:
-                    side_emoji = "👍" if decision.side == "YES" else "👎"
-                    st.metric(f"{side_emoji} Side", decision.side)
-                    st.caption(
-                        "Which side to bet on. **YES** = you think the event will happen. "
-                        "**NO** = you think it won't."
-                    )
-                with b2:
-                    st.metric("💵 Stake", f"${decision.stake_usd:,.2f}")
-                    st.caption(
-                        f"How much to bet, based on your ${bankroll_override:,.0f} bankroll "
-                        "and conservative Kelly sizing (protects against overconfidence)."
-                    )
-                with b3:
-                    st.metric("📦 Contracts", decision.contracts)
-                    st.caption(
-                        "Number of contracts to buy at the current price. "
-                        "Each contract pays $1 if your side wins."
+                if decision.signal == "GO":
+                    b1, b2, b3 = st.columns(3)
+                    with b1:
+                        side_emoji = "👍" if decision.side == "YES" else "👎"
+                        st.metric(f"{side_emoji} Side", decision.side)
+                        st.caption(
+                            "Which side to bet on. **YES** = you think the event will happen. "
+                            "**NO** = you think it won't."
+                        )
+                    with b2:
+                        st.metric("💵 Stake", f"${decision.stake_usd:,.2f}")
+                        st.caption(
+                            f"How much to bet, based on your ${bankroll_override:,.0f} bankroll "
+                            "and conservative Kelly sizing (protects against overconfidence)."
+                        )
+                    with b3:
+                        st.metric("📦 Contracts", decision.contracts)
+                        st.caption(
+                            "Number of contracts to buy at the current price. "
+                            "Each contract pays $1 if your side wins."
+                        )
+                else:
+                    st.info(
+                        "🚫 **No bet recommended.** The system didn't find a large enough "
+                        "edge to justify risking money. See the reasons below."
                     )
 
                 if decision.reasons_blocked:
