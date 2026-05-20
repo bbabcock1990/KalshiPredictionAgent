@@ -48,11 +48,12 @@ from tradingagents.llm_clients import create_llm_client
 from ..kalshi.models import Market, OrderbookSnapshot
 from .base import AgentReport
 from .tools import (
+    build_news_queries,
     clear_context,
-    get_economic_data,
     get_event_market_data,
     get_event_orderbook,
-    search_event_news,
+    get_global_news,
+    get_news,
     set_context,
 )
 
@@ -99,12 +100,16 @@ The event contract ticker is: {ticker}. Analysis date: {state['trade_date']}."""
 
 
 def _create_event_public_signal_analyst(llm):
-    """Pre-fetches Kalshi market data and produces a public-signal report (no tool calls)."""
+    """Pre-fetches Kalshi market data + news and produces a public-signal report."""
 
     def node(state) -> dict:
         ticker = state["company_of_interest"]
+        trade_date = state["trade_date"]
         market_data = get_event_market_data.func(ticker)
         orderbook_data = get_event_orderbook.func(ticker)
+
+        # Pre-fetch news via TA's get_global_news
+        news_block = get_global_news.func(trade_date)
 
         system_message = f"""You are a public-signal analyst for event markets. Assess the consensus \
 view on this binary event contract by analyzing all available signals.
@@ -117,16 +122,21 @@ view on this binary event contract by analyzing all available signals.
 {orderbook_data}
 </orderbook>
 
+<recent_news>
+{news_block}
+</recent_news>
+
 Analyze:
 1. What the current market price implies about consensus probability
 2. Whether volume/OI suggest informed or uninformed pricing
 3. Any signals from the orderbook about directional conviction
-4. What external data sources (polls, forecasts, betting markets, official data) \
-might inform this question — note what you know from training and flag uncertainty
-5. Overall public-signal assessment: is the market price likely efficient, \
+4. What the recent news tells you about the likely outcome
+5. What external data sources (polls, forecasts, betting markets, official data) \
+might inform this question — note what you know and flag uncertainty
+6. Overall public-signal assessment: is the market price likely efficient, \
 too high, or too low?
 
-Event contract ticker: {ticker}. Date: {state['trade_date']}."""
+Event contract ticker: {ticker}. Date: {trade_date}."""
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_message),
@@ -140,7 +150,7 @@ Event contract ticker: {ticker}. Date: {state['trade_date']}."""
 
 
 def _create_event_news_analyst(llm):
-    """Searches for and analyzes news relevant to the event question."""
+    """Searches for and analyzes news relevant to the event question using TA's news tools."""
 
     def node(state) -> dict:
         ticker = state["company_of_interest"]
@@ -155,9 +165,9 @@ Focus on:
 - Timeline factors (when is the event expected to resolve?)
 - Anything that shifts the probability of YES vs NO
 
-Use the search_event_news tool to find relevant headlines. If the tool returns \
-a placeholder, use your own training knowledge but clearly distinguish known \
-facts from speculation.
+Use the get_global_news tool to search for relevant headlines. You can also use \
+get_news with a relevant stock/index ticker if appropriate (e.g., "^TNX" for \
+Treasury yields on Fed rate markets).
 
 Event contract ticker: {ticker}. Date: {state['trade_date']}."""
 
@@ -165,7 +175,7 @@ Event contract ticker: {ticker}. Date: {state['trade_date']}."""
             ("system", system_message),
             MessagesPlaceholder(variable_name="messages"),
         ])
-        tools = [search_event_news]
+        tools = [get_news, get_global_news]
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state)
         return {"messages": [result], "news_report": result.content}
@@ -174,7 +184,7 @@ Event contract ticker: {ticker}. Date: {state['trade_date']}."""
 
 
 def _create_event_base_rate_analyst(llm):
-    """Analyzes historical base rates and economic fundamentals for the event."""
+    """Analyzes historical base rates and economic fundamentals using TA's news tools."""
 
     def node(state) -> dict:
         ticker = state["company_of_interest"]
@@ -189,9 +199,9 @@ Focus on:
 - Structural factors that constrain the range of outcomes
 - How the current situation compares to historical precedents
 
-Use the get_economic_data tool to retrieve FRED series if relevant \
-(e.g., FEDFUNDS for Fed rate markets, CPIAUCSL for inflation). If the \
-tool returns a placeholder, use your training knowledge.
+Use the get_global_news tool to find recent economic data releases and analysis. \
+You can also use get_news with relevant index tickers (e.g., "^TNX" for Treasury \
+yields, "^GSPC" for S&P 500) to get macro-relevant market news.
 
 Event contract ticker: {ticker}. Date: {state['trade_date']}."""
 
@@ -199,7 +209,7 @@ Event contract ticker: {ticker}. Date: {state['trade_date']}."""
             ("system", system_message),
             MessagesPlaceholder(variable_name="messages"),
         ])
-        tools = [get_economic_data]
+        tools = [get_news, get_global_news]
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state)
         return {"messages": [result], "fundamentals_report": result.content}
@@ -509,12 +519,12 @@ class KalshiTradingGraph:
         self.deep_thinking_llm = deep_client.get_llm()
         self.quick_thinking_llm = quick_client.get_llm()
 
-        # Tool nodes
+        # Tool nodes — combine our Kalshi tools with TA's news tools
         tool_nodes = {
             "market": ToolNode([get_event_market_data, get_event_orderbook]),
-            "social": ToolNode([search_event_news]),
-            "news": ToolNode([search_event_news]),
-            "fundamentals": ToolNode([get_economic_data]),
+            "social": ToolNode([get_news, get_global_news]),
+            "news": ToolNode([get_news, get_global_news]),
+            "fundamentals": ToolNode([get_global_news]),
         }
 
         # Build graph with event-market factories
@@ -561,6 +571,11 @@ class KalshiTradingGraph:
         """
         set_context(market, orderbook)
         trade_date = datetime.now().strftime("%Y-%m-%d")
+
+        # Set global_news_queries to event-relevant searches so TA's
+        # get_global_news tool fetches the right articles
+        self.config["global_news_queries"] = build_news_queries(market)
+        set_config(self.config)
 
         # Build initial state matching TradingAgents' AgentState
         market_context = self._build_market_context(market)

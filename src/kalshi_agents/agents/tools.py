@@ -1,12 +1,15 @@
 """Kalshi-specific tool functions for the TradingAgents agent graph.
 
-These are LangChain @tool functions that the analyst nodes call.
-Market/orderbook data is pre-loaded via set_context() before each run.
+Combines:
+  - Our Kalshi market/orderbook tools (pre-loaded via set_context())
+  - TradingAgents' get_news / get_global_news (via yfinance Search)
 """
 
 from __future__ import annotations
 
 from langchain_core.tools import tool
+
+from tradingagents.agents.utils.news_data_tools import get_global_news, get_news
 
 from ..kalshi.models import Market, OrderbookSnapshot
 
@@ -21,6 +24,27 @@ def set_context(market: Market, orderbook: OrderbookSnapshot | None = None) -> N
 
 def clear_context() -> None:
     _context.clear()
+
+
+def build_news_queries(market: Market) -> list[str]:
+    """Generate search queries for get_global_news from the market title."""
+    title = market.title or ""
+    queries = [title]
+    # Add focused sub-queries based on common market categories
+    lower = title.lower()
+    if "federal reserve" in lower or "fed" in lower:
+        queries.append("Federal Reserve interest rate decision monetary policy")
+        queries.append("FOMC meeting rate cut rate hike forecast")
+    if "inflation" in lower or "cpi" in lower:
+        queries.append("US CPI inflation consumer prices latest data")
+    if "unemployment" in lower or "jobs" in lower:
+        queries.append("US jobs report unemployment rate nonfarm payrolls")
+    if "gdp" in lower:
+        queries.append("US GDP economic growth forecast")
+    # Always include a general macro query
+    if len(queries) < 3:
+        queries.append("US economy monetary policy outlook")
+    return queries[:5]
 
 
 @tool
@@ -72,21 +96,13 @@ def get_event_orderbook(ticker: str) -> str:
     return "\n".join(lines)
 
 
-@tool
-def search_event_news(query: str) -> str:
-    """Search for recent news relevant to an event market question. Returns headlines and summaries."""
-    return (
-        "[News API not yet configured. Rely on your training knowledge of recent "
-        "events relevant to this market question. State clearly what you know vs. "
-        "what you are uncertain about.]"
-    )
-
-
-@tool
-def get_economic_data(series_id: str) -> str:
-    """Retrieve economic data from FRED for a given series ID (e.g., FEDFUNDS, CPIAUCSL, UNRATE)."""
-    return (
-        f"[FRED API not yet configured for series '{series_id}'. "
-        "Use your training knowledge of recent economic data. "
-        "State the most recent values you are aware of and note your knowledge cutoff.]"
-    )
+# Re-export TA's tools so they're importable from this module
+__all__ = [
+    "set_context",
+    "clear_context",
+    "build_news_queries",
+    "get_event_market_data",
+    "get_event_orderbook",
+    "get_news",
+    "get_global_news",
+]
