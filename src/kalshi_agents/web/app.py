@@ -131,6 +131,21 @@ if page == "⚙️ Settings":
 elif page == "🏠 Dashboard":
     st.header("🏠 Signal Dashboard")
 
+    # --- Live/Demo banner ---
+    if s()["kalshi_env"] == "prod":
+        st.info(
+            "🔴 **LIVE MARKETS** — You are viewing real Kalshi markets with real money. "
+            "This tool is **read-only** — it analyzes markets and recommends bets but "
+            "never places orders on your behalf.",
+            icon="📡",
+        )
+    else:
+        st.warning(
+            "🟡 **DEMO MODE** — You are viewing Kalshi's demo/sandbox environment. "
+            "Markets use play money. Switch to **prod** in Settings for real markets.",
+            icon="🧪",
+        )
+
     # --- Market lookup ---
     col_input, col_btn = st.columns([3, 1])
     with col_input:
@@ -143,49 +158,108 @@ elif page == "🏠 Dashboard":
         fetch_clicked = st.button("🔍 Fetch Market", use_container_width=True)
 
     # --- Market browser ---
-    with st.expander("📋 Browse Markets by Series", expanded=not ticker):
-        series_col, market_col = st.columns([1, 2])
-        with series_col:
-            series_input = st.text_input(
-                "Series ticker",
-                value="KXFEDDECISION",
-                help="Try: KXFEDDECISION, KXTEMPNYCH, KXCPI, KXUNEMPLOYMENT",
-            )
-            browse_clicked = st.button("Browse", use_container_width=True)
+    CATEGORIES = [
+        "All", "Sports", "Politics", "Economics", "Elections",
+        "Entertainment", "Financials", "Climate and Weather",
+        "Crypto", "Science and Technology", "World", "Companies",
+        "Health", "Commodities",
+    ]
 
-        if browse_clicked and series_input:
-            base = (
-                "https://api.elections.kalshi.com/trade-api/v2"
-                if s()["kalshi_env"] == "prod"
-                else "https://demo-api.kalshi.co/trade-api/v2"
+    base_url = (
+        "https://api.elections.kalshi.com/trade-api/v2"
+        if s()["kalshi_env"] == "prod"
+        else "https://demo-api.kalshi.co/trade-api/v2"
+    )
+
+    with st.expander("📋 Browse & Filter Markets", expanded=not ticker):
+        filter_col, results_col = st.columns([1, 2])
+
+        with filter_col:
+            st.markdown("**Filter by category**")
+            selected_cat = st.selectbox(
+                "Category", CATEGORIES, label_visibility="collapsed"
             )
-            try:
-                r = httpx.get(
-                    f"{base}/markets",
-                    params={"series_ticker": series_input, "status": "open", "limit": 50},
-                    timeout=10,
-                )
-                markets = r.json().get("markets", [])
-                with market_col:
-                    if not markets:
-                        st.warning("No open markets in this series.")
+            search_text = st.text_input(
+                "Search by keyword",
+                placeholder="e.g. Fed, NBA, Trump, Bitcoin",
+            )
+            series_input = st.text_input(
+                "Or enter series ticker directly",
+                placeholder="e.g. KXFEDDECISION",
+                help="Series group related markets (e.g., all Fed rate meetings).",
+            )
+            browse_clicked = st.button("🔎 Search Markets", use_container_width=True)
+
+        if browse_clicked:
+            with results_col:
+                try:
+                    if series_input:
+                        # Search by series ticker
+                        r = httpx.get(
+                            f"{base_url}/markets",
+                            params={"series_ticker": series_input.strip(), "status": "open", "limit": 50},
+                            timeout=15,
+                        )
+                        found = r.json().get("markets", [])
                     else:
-                        for m in markets[:20]:
-                            bid = m.get("yes_bid_dollars") or "0"
-                            ask = m.get("yes_ask_dollars") or "0"
+                        # Search by events (supports category/keyword)
+                        params = {"status": "open", "limit": 100}
+                        r = httpx.get(f"{base_url}/events", params=params, timeout=15)
+                        events = r.json().get("events", [])
+
+                        # Filter by category
+                        if selected_cat != "All":
+                            events = [
+                                e for e in events
+                                if (e.get("category") or "").lower() == selected_cat.lower()
+                            ]
+
+                        # Filter by keyword
+                        if search_text:
+                            kw = search_text.lower()
+                            events = [
+                                e for e in events
+                                if kw in (e.get("title") or "").lower()
+                                or kw in (e.get("event_ticker") or "").lower()
+                            ]
+
+                        # Fetch markets for matching events
+                        found = []
+                        for ev in events[:15]:
+                            et = ev.get("event_ticker")
+                            if not et:
+                                continue
+                            mr = httpx.get(
+                                f"{base_url}/markets",
+                                params={"event_ticker": et, "status": "open", "limit": 10},
+                                timeout=10,
+                            )
+                            found.extend(mr.json().get("markets", []))
+                            if len(found) >= 30:
+                                break
+
+                    if not found:
+                        st.warning("No open markets found. Try a different filter.")
+                    else:
+                        st.markdown(f"**{len(found)} market(s) found**")
+                        for m in found[:30]:
+                            bid = m.get("yes_bid_dollars") or "—"
+                            ask = m.get("yes_ask_dollars") or "—"
                             vol = m.get("volume_fp") or "0"
-                            label = f"**{m['ticker']}** — {(m.get('title') or '')[:80]}"
-                            detail = f"bid={bid} ask={ask} vol={vol}"
+                            title = (m.get("title") or m["ticker"])[:90]
+                            cat = m.get("category") or ""
+                            cat_badge = f" `{cat}`" if cat else ""
+
                             if st.button(
-                                f"{label}\n{detail}",
-                                key=m["ticker"],
+                                f"**{title}**{cat_badge}\n"
+                                f"`{m['ticker']}` · YES {bid}/{ask} · vol {vol}",
+                                key=f"browse_{m['ticker']}",
                                 use_container_width=True,
                             ):
                                 st.session_state["selected_ticker"] = m["ticker"]
                                 st.rerun()
-            except Exception as e:
-                with market_col:
-                    st.error(f"Error: {e}")
+                except Exception as e:
+                    st.error(f"Error searching: {e}")
 
     # Use selected ticker from browser if available
     if not ticker and "selected_ticker" in st.session_state:
@@ -195,7 +269,7 @@ elif page == "🏠 Dashboard":
     ticker = ticker.strip() if ticker else ""
 
     if not ticker:
-        st.info("Enter a Kalshi ticker above or browse by series to get started.")
+        st.info("Enter a Kalshi ticker above or browse markets to get started.")
         st.stop()
 
     if not fetch_clicked and "current_market" not in st.session_state:
