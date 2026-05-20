@@ -246,10 +246,17 @@ What we **replace** for event markets:
 |---------------|------------------------|
 | Market analyst (price/indicators) | Microstructure analyst (orderbook/spread) |
 | Fundamentals analyst (balance sheet) | Base rate analyst (historical frequency) |
-| Sentiment analyst (StockTwits/Reddit) | Public signal analyst (consensus/signals) |
-| News analyst (company news) | Event news analyst (topic-specific search) |
 | Bull / Bear researchers | YES / NO researchers |
 | Buy/Sell/Hold output | P(YES) probability + Kelly sizing |
+
+What we **reuse as-is** from TradingAgents:
+
+| Component | Why It Works Unchanged |
+|-----------|----------------------|
+| News analyst + `get_news` / `get_global_news` tools | News search is topic-based — works for events just like stocks |
+| Sentiment analyst | Aggregates public sentiment from the same sources |
+| Research Manager / Trader / Portfolio Manager | Decision-making logic is domain-agnostic |
+| Risk debate (Aggressive / Conservative / Neutral) | Risk assessment applies to any bet |
 
 ---
 
