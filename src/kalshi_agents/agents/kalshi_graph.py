@@ -54,6 +54,7 @@ from .tools import (
     get_event_orderbook,
     get_global_news,
     get_news,
+    get_speech_frequency,
     set_context,
 )
 
@@ -184,7 +185,7 @@ Event contract ticker: {ticker}. Date: {state['trade_date']}."""
 
 
 def _create_event_base_rate_analyst(llm):
-    """Analyzes historical base rates and economic fundamentals using TA's news tools."""
+    """Analyzes historical base rates and fundamentals using news and speech tools."""
 
     def node(state) -> dict:
         ticker = state["company_of_interest"]
@@ -201,15 +202,18 @@ Focus on:
 
 Use the get_global_news tool to find recent economic data releases and analysis. \
 You can also use get_news with relevant index tickers (e.g., "^TNX" for Treasury \
-yields, "^GSPC" for S&P 500) to get macro-relevant market news.
+yields, "^GSPC" for S&P 500) to get macro-relevant market news. Use the \
+get_speech_frequency tool to look up how often a person has mentioned a \
+specific keyword in speeches and statements when the market depends on what \
+someone is likely to say.
 
-Event contract ticker: {ticker}. Date: {state['trade_date']}."""
+Event contract ticker: {ticker}. Date: {state['trade_date']}"""
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_message),
             MessagesPlaceholder(variable_name="messages"),
         ])
-        tools = [get_news, get_global_news]
+        tools = [get_news, get_global_news, get_speech_frequency]
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state)
         return {"messages": [result], "fundamentals_report": result.content}
@@ -524,7 +528,7 @@ class KalshiTradingGraph:
             "market": ToolNode([get_event_market_data, get_event_orderbook]),
             "social": ToolNode([get_news, get_global_news]),
             "news": ToolNode([get_news, get_global_news]),
-            "fundamentals": ToolNode([get_global_news]),
+            "fundamentals": ToolNode([get_global_news, get_speech_frequency]),
         }
 
         # Build graph with event-market factories

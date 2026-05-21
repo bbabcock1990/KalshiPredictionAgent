@@ -12,6 +12,7 @@ from langchain_core.tools import tool
 from tradingagents.agents.utils.news_data_tools import get_global_news, get_news
 
 from ..kalshi.models import Market, OrderbookSnapshot
+from .speech_analysis import get_speech_frequency as _get_speech_frequency
 
 # Module-level context — set before each graph run via set_context()
 _context: dict = {}
@@ -96,6 +97,12 @@ def get_event_orderbook(ticker: str) -> str:
     return "\n".join(lines)
 
 
+@tool
+def get_speech_frequency(person: str, keyword: str, lookback_days: int = 180) -> str:
+    """Analyze how frequently a keyword appears in a public figure's recent speeches and statements."""
+    return _get_speech_frequency(person, keyword, lookback_days)
+
+
 # Re-export TA's tools so they're importable from this module
 __all__ = [
     "set_context",
@@ -103,6 +110,7 @@ __all__ = [
     "build_news_queries",
     "get_event_market_data",
     "get_event_orderbook",
+    "get_speech_frequency",
     "get_news",
     "get_global_news",
 ]
