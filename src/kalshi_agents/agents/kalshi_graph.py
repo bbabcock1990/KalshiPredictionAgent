@@ -14,7 +14,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict
+from typing import Annotated, Any, Dict
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph import END, START, StateGraph
@@ -26,8 +26,10 @@ from tradingagents.agents import (
     create_conservative_debator,
     create_msg_delete,
     create_neutral_debator,
+    create_news_analyst,
     create_portfolio_manager,
     create_research_manager,
+    create_sentiment_analyst,
     create_trader,
 )
 from tradingagents.agents.utils.agent_states import (
@@ -35,14 +37,11 @@ from tradingagents.agents.utils.agent_states import (
     InvestDebateState,
     RiskDebateState,
 )
-from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.dataflows.config import set_config
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.analyst_execution import build_analyst_execution_plan
 from tradingagents.graph.conditional_logic import ConditionalLogic
 from tradingagents.graph.setup import GraphSetup
-from tradingagents.graph.signal_processing import SignalProcessor
-from tradingagents.graph.propagation import Propagator
 from tradingagents.llm_clients import create_llm_client
 
 from ..kalshi.models import Market, OrderbookSnapshot
@@ -50,7 +49,6 @@ from .base import AgentReport
 from .tools import (
     build_news_queries,
     clear_context,
-    get_current_market_topic,
     get_event_market_data,
     get_event_orderbook,
     get_global_news,
@@ -62,6 +60,15 @@ from .tools import (
 logger = logging.getLogger(__name__)
 
 
+class KalshiAgentState(AgentState):
+    """Kalshi graph state with the original market ticker preserved."""
+
+    market_ticker: Annotated[
+        str,
+        "Original Kalshi market ticker for contract-specific tools",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Event-market analyst factories
 # ---------------------------------------------------------------------------
@@ -70,7 +77,7 @@ def _create_event_microstructure_analyst(llm):
     """Analyzes Kalshi orderbook structure, spread, volume, and price action."""
 
     def node(state) -> dict:
-        ticker = state["company_of_interest"]
+        ticker = state.get("market_ticker", state["company_of_interest"])
 
         system_message = f"""You are an event-market microstructure analyst. Analyze the current \
 market structure of a Kalshi binary event contract.
@@ -101,102 +108,12 @@ The event contract ticker is: {ticker}. Analysis date: {state['trade_date']}."""
     return node
 
 
-def _create_event_public_signal_analyst(llm):
-    """Pre-fetches market, news, and social signals for a public-signal report."""
-
-    def node(state) -> dict:
-        ticker = state["company_of_interest"]
-        trade_date = state["trade_date"]
-        market_data = get_event_market_data.func(ticker)
-        orderbook_data = get_event_orderbook.func(ticker)
-        social_topic = get_current_market_topic(ticker)
-
-        # Pre-fetch news and social media context.
-        news_block = get_global_news.func(trade_date)
-        social_block = get_social_media_signals.func(social_topic)
-
-        system_message = f"""You are a public-signal analyst for event markets. Assess the consensus \
-view on this binary event contract by analyzing all available signals.
-
-<market_data>
-{market_data}
-</market_data>
-
-<orderbook>
-{orderbook_data}
-</orderbook>
-
-<recent_news>
-{news_block}
-</recent_news>
-
-<social_media>
-{social_block}
-</social_media>
-
-Analyze:
-1. What the current market price implies about consensus probability
-2. Whether volume/OI suggest informed or uninformed pricing
-3. Any signals from the orderbook about directional conviction
-4. What the recent news tells you about the likely outcome
-5. What recent social media activity by relevant public figures or communities suggests
-6. What external data sources (polls, forecasts, betting markets, official data) \
-might inform this question — note what you know and flag uncertainty
-7. Overall public-signal assessment: is the market price likely efficient, \
-too high, or too low?
-
-Event contract ticker: {ticker}. Topic: {social_topic}. Date: {trade_date}."""
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_message),
-            MessagesPlaceholder(variable_name="messages"),
-        ])
-        chain = prompt | llm
-        result = chain.invoke(state)
-        return {"messages": [result], "sentiment_report": result.content}
-
-    return node
-
-
-def _create_event_news_analyst(llm):
-    """Searches for and analyzes news relevant to the event question using TA's news tools."""
-
-    def node(state) -> dict:
-        ticker = state["company_of_interest"]
-
-        system_message = f"""You are a news analyst for event markets. Find and analyze recent news \
-that could affect the outcome of this binary event contract.
-
-Focus on:
-- Recent developments directly related to the event question
-- Policy announcements, official statements, or data releases
-- Expert predictions or forecasts
-- Timeline factors (when is the event expected to resolve?)
-- Anything that shifts the probability of YES vs NO
-
-Use the get_global_news tool to search for relevant headlines. You can also use \
-get_news with a relevant stock/index ticker if appropriate (e.g., "^TNX" for \
-Treasury yields on Fed rate markets).
-
-Event contract ticker: {ticker}. Date: {state['trade_date']}."""
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_message),
-            MessagesPlaceholder(variable_name="messages"),
-        ])
-        tools = [get_news, get_global_news]
-        chain = prompt | llm.bind_tools(tools)
-        result = chain.invoke(state)
-        return {"messages": [result], "news_report": result.content}
-
-    return node
-
-
 def _create_event_base_rate_analyst(llm):
     """Analyzes historical base rates and economic fundamentals using TA's news tools."""
 
     def node(state) -> dict:
-        ticker = state["company_of_interest"]
+        topic = state["company_of_interest"]
+        ticker = state.get("market_ticker", topic)
 
         system_message = f"""You are a base-rate and fundamentals analyst for event markets. Your job \
 is to ground the probability estimate in historical data and structural analysis.
@@ -212,7 +129,7 @@ Use the get_global_news tool to find recent economic data releases and analysis.
 You can also use get_news with relevant index tickers (e.g., "^TNX" for Treasury \
 yields, "^GSPC" for S&P 500) to get macro-relevant market news.
 
-Event contract ticker: {ticker}. Date: {state['trade_date']}."""
+Event topic: {topic}. Kalshi ticker: {ticker}. Date: {state['trade_date']}."""
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_message),
@@ -335,8 +252,8 @@ class KalshiGraphSetup(GraphSetup):
 
         analyst_factories = {
             "market": lambda: _create_event_microstructure_analyst(self.quick_thinking_llm),
-            "social": lambda: _create_event_public_signal_analyst(self.quick_thinking_llm),
-            "news": lambda: _create_event_news_analyst(self.quick_thinking_llm),
+            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
+            "news": lambda: create_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: _create_event_base_rate_analyst(self.quick_thinking_llm),
         }
 
@@ -353,7 +270,7 @@ class KalshiGraphSetup(GraphSetup):
         portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm)
 
         # Build the workflow (same graph structure as TradingAgents)
-        workflow = StateGraph(AgentState)
+        workflow = StateGraph(KalshiAgentState)
 
         for spec in plan.specs:
             workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
@@ -595,10 +512,12 @@ class KalshiTradingGraph:
         set_config(self.config)
 
         # Build initial state matching TradingAgents' AgentState
+        topic = self._extract_topic(market)
         market_context = self._build_market_context(market)
         init_state = {
             "messages": [("human", market_context)],
-            "company_of_interest": market.ticker,
+            "company_of_interest": topic,
+            "market_ticker": market.ticker,
             "asset_type": "event",
             "trade_date": trade_date,
             "past_context": "",
@@ -691,12 +610,18 @@ class KalshiTradingGraph:
         )
 
     @staticmethod
+    def _extract_topic(market: Market) -> str:
+        """Return a human-readable topic string for TA's news/sentiment analysts."""
+        topic = (market.title or "").strip()
+        return topic or market.ticker
+
+    @staticmethod
     def _build_market_context(market: Market) -> str:
         lines = [
             "Analyze this Kalshi binary event market:",
-            f"",
+            "",
             f"Question: {market.title}",
-            f"Ticker: {market.ticker}",
+            f"Kalshi ticker: {market.ticker}",
             f"Current YES price (implied probability): {market.yes_mid:.4f}",
             f"YES bid/ask: {market.yes_bid:.4f} / {market.yes_ask:.4f}",
             f"Spread: {market.spread_cents} cents",
