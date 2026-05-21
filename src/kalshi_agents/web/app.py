@@ -5,6 +5,8 @@ Launch with:  streamlit run src/kalshi_agents/web/app.py
 
 from __future__ import annotations
 
+import os
+
 import httpx
 import streamlit as st
 
@@ -162,6 +164,85 @@ if page == "⚙️ Settings":
         settings["min_minutes_to_close"] = st.number_input(
             "Min Minutes to Close", value=int(settings["min_minutes_to_close"]), min_value=0, step=10,
         )
+
+    st.divider()
+    st.subheader("🔌 Data Sources & API Keys")
+    st.caption("Configure external data sources. All keys are stored locally and never sent to third parties.")
+
+    ds_col1, ds_col2 = st.columns(2)
+
+    with ds_col1:
+        st.markdown("**API Keys**")
+
+        settings["twitter_bearer_token"] = st.text_input(
+            "X/Twitter Bearer Token",
+            value=settings.get("twitter_bearer_token", ""),
+            type="password",
+            help="Required for X/Twitter social media analysis. Get one at developer.twitter.com",
+        )
+        if settings["twitter_bearer_token"]:
+            st.caption("✅ X/Twitter API configured")
+        else:
+            st.caption("⚠️ X/Twitter API not configured — social media analysis will use Truth Social and Reddit only")
+
+        settings["newsapi_key"] = st.text_input(
+            "NewsAPI Key",
+            value=settings.get("newsapi_key", ""),
+            type="password",
+            help="Optional. Provides additional news sources. Get one at newsapi.org",
+        )
+        if settings["newsapi_key"]:
+            st.caption("✅ NewsAPI configured")
+        else:
+            st.caption("ℹ️ NewsAPI not configured — using default news sources")
+
+        settings["fred_api_key"] = st.text_input(
+            "FRED API Key",
+            value=settings.get("fred_api_key", ""),
+            type="password",
+            help="Optional. Federal Reserve Economic Data. Get one at fred.stlouisfed.org",
+        )
+        if settings["fred_api_key"]:
+            st.caption("✅ FRED API configured")
+        else:
+            st.caption("ℹ️ FRED API not configured — using default economic data sources")
+
+    with ds_col2:
+        st.markdown("**Data Source Modules**")
+
+        settings["enable_social_media"] = st.toggle(
+            "📱 Social Media Analysis",
+            value=settings.get("enable_social_media", True),
+            help="Fetches Truth Social, X/Twitter, and Reddit posts for political/behavioral markets",
+        )
+
+        settings["enable_speech_analysis"] = st.toggle(
+            "🎤 Speech & Statement Analysis",
+            value=settings.get("enable_speech_analysis", True),
+            help="Analyzes historical speech transcripts and keyword frequency for behavioral markets",
+        )
+
+        settings["enable_event_calendar"] = st.toggle(
+            "📅 Event Calendar",
+            value=settings.get("enable_event_calendar", True),
+            help="Provides FOMC meetings, BLS releases, sports schedules, and political event data",
+        )
+
+        st.divider()
+        st.markdown("**Status**")
+        sources_active = sum([
+            settings.get("enable_social_media", True),
+            settings.get("enable_speech_analysis", True),
+            settings.get("enable_event_calendar", True),
+        ])
+        st.caption(f"🟢 {sources_active}/3 data sources active")
+
+        apis_configured = sum([
+            bool(settings.get("twitter_bearer_token")),
+            bool(settings.get("newsapi_key")),
+            bool(settings.get("fred_api_key")),
+        ])
+        st.caption(f"🔑 {apis_configured}/3 optional API keys configured")
 
     if st.button("💾 Save Settings", type="primary", use_container_width=True):
         settings_store.save(settings)
@@ -409,16 +490,16 @@ elif page == "🏠 Dashboard":
         # --- Node-to-stage mapping for progress bar ---
         NODE_INFO = {
             "Market Analyst":        ("📊 Analyzing market microstructure...", 0.07),
-            "tools_market":          ("📊 Fetching orderbook data...", 0.10),
+            "tools_market":          ("📊 Fetching orderbook & event schedule...", 0.10),
             "Msg Clear Market":      ("✅ Market analysis complete", 0.13),
             "Sentiment Analyst":     ("📡 Assessing public signals & consensus...", 0.20),
-            "tools_social":          ("📡 Fetching signal data...", 0.22),
+            "tools_social":          ("📡 Fetching social media & sentiment signals...", 0.22),
             "Msg Clear Sentiment":   ("✅ Public signal analysis complete", 0.25),
             "News Analyst":          ("📰 Searching for relevant news...", 0.33),
             "tools_news":            ("📰 Fetching news articles...", 0.37),
             "Msg Clear News":        ("✅ News analysis complete", 0.40),
             "Fundamentals Analyst":  ("📈 Analyzing base rates & fundamentals...", 0.47),
-            "tools_fundamentals":    ("📈 Fetching economic data...", 0.50),
+            "tools_fundamentals":    ("📈 Fetching economic data, speech history & event calendar...", 0.50),
             "Msg Clear Fundamentals":("✅ Base rate analysis complete", 0.53),
             "Bull Researcher":       ("🟢 YES Researcher making the case for YES...", 0.60),
             "Bear Researcher":       ("🔴 NO Researcher making the case for NO...", 0.67),
@@ -468,6 +549,21 @@ elif page == "🏠 Dashboard":
             ta_config["quick_think_llm"] = s()["llm_model"]
             ta_config["max_debate_rounds"] = 1
             ta_config["max_risk_discuss_rounds"] = 1
+            ta_config["enable_social_media"] = s().get("enable_social_media", True)
+            ta_config["enable_speech_analysis"] = s().get("enable_speech_analysis", True)
+            ta_config["enable_event_calendar"] = s().get("enable_event_calendar", True)
+
+            # Inject API keys from settings into environment for data source modules
+            api_keys = {
+                "TWITTER_BEARER_TOKEN": s().get("twitter_bearer_token", ""),
+                "NEWSAPI_KEY": s().get("newsapi_key", ""),
+                "FRED_API_KEY": s().get("fred_api_key", ""),
+            }
+            for env_key, env_val in api_keys.items():
+                if env_val:
+                    os.environ[env_key] = env_val
+                elif env_key in os.environ:
+                    del os.environ[env_key]
 
             report = run_kalshi_agents(
                 market, orderbook, config=ta_config,
@@ -637,6 +733,25 @@ elif page == "🏠 Dashboard":
 
             with st.expander("📝 AI Agent Rationale (detailed)", expanded=False):
                 st.write(decision.rationale)
+
+            with st.expander("🔌 Data Sources Used", expanded=False):
+                if s().get("enable_social_media", True):
+                    st.markdown("✅ **Social Media** — Truth Social, X/Twitter, Reddit political subreddits")
+                else:
+                    st.markdown("⬜ **Social Media** — Disabled")
+
+                if s().get("enable_speech_analysis", True):
+                    st.markdown("✅ **Speech Analysis** — Presidential speech transcripts, keyword frequency")
+                else:
+                    st.markdown("⬜ **Speech Analysis** — Disabled")
+
+                if s().get("enable_event_calendar", True):
+                    st.markdown("✅ **Event Calendar** — FOMC, BLS, sports, political events")
+                else:
+                    st.markdown("⬜ **Event Calendar** — Disabled")
+
+                st.divider()
+                st.caption("Configure data sources in ⚙️ Settings")
 
         except Exception as e:
             st.error(f"Pipeline error: {e}")
