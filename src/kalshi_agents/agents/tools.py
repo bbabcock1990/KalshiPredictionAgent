@@ -13,8 +13,8 @@ from langchain_core.tools import tool
 from tradingagents.agents.utils.news_data_tools import get_global_news, get_news
 
 from ..kalshi.models import Market, OrderbookSnapshot
-from .speech_analysis import get_speech_frequency as _get_speech_frequency
 from .social_media import fetch_social_media_signals
+from .speech_analysis import get_speech_frequency as _get_speech_frequency
 
 # Module-level context — set before each graph run via set_context()
 _context: dict = {}
