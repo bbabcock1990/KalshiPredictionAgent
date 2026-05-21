@@ -53,6 +53,7 @@ from .tools import (
     get_event_orderbook,
     get_global_news,
     get_news,
+    get_social_media_signals,
     set_context,
 )
 
@@ -447,7 +448,7 @@ class KalshiTradingGraph:
         # Tool nodes — combine our Kalshi tools with TA's news tools
         tool_nodes = {
             "market": ToolNode([get_event_market_data, get_event_orderbook]),
-            "social": ToolNode([get_news, get_global_news]),
+            "social": ToolNode([get_social_media_signals, get_news, get_global_news]),
             "news": ToolNode([get_news, get_global_news]),
             "fundamentals": ToolNode([get_global_news]),
         }
