@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from kalshi_agents.agents.kalshi_graph import (
     KalshiTradingGraph,
@@ -53,12 +54,16 @@ def test_safe_sentiment_analyst_handles_url_errors(monkeypatch):
     monkeypatch.setattr("tradingagents.agents.create_sentiment_analyst", fake_factory)
 
     state = {
-        "messages": [("human", "context")],
+        "messages": [HumanMessage(content="context")],
         "company_of_interest": "Who will TIME name as Person of the Decade?",
     }
     result = _create_safe_sentiment_analyst(None)(state)
 
-    assert result["messages"] == state["messages"]
+    assert len(result["messages"]) == 1
+    assert isinstance(result["messages"][-1], AIMessage)
+    assert hasattr(result["messages"][-1], "tool_calls")
+    assert result["messages"][-1].tool_calls == []
+    assert result["messages"][-1].content == result["sentiment_report"]
     assert "Sentiment analysis partially available." in result["sentiment_report"]
     assert "StockTwits and Reddit data could not be fetched" in result["sentiment_report"]
 
@@ -85,8 +90,12 @@ def test_safe_news_analyst_returns_fallback_report(monkeypatch):
 
     monkeypatch.setattr("tradingagents.agents.create_news_analyst", fake_factory)
 
-    result = _create_safe_news_analyst(None)({"messages": [("human", "context")]})
+    result = _create_safe_news_analyst(None)({"messages": [HumanMessage(content="context")]})
 
-    assert result["messages"] == [("human", "context")]
+    assert len(result["messages"]) == 1
+    assert isinstance(result["messages"][-1], AIMessage)
+    assert hasattr(result["messages"][-1], "tool_calls")
+    assert result["messages"][-1].tool_calls == []
+    assert result["messages"][-1].content == result["news_report"]
     assert "News analysis could not be completed." in result["news_report"]
     assert "news provider timeout" in result["news_report"]

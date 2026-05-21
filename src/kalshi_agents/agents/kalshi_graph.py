@@ -16,6 +16,7 @@ import re
 from datetime import datetime
 from typing import Annotated, Any, Dict
 
+from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
@@ -192,13 +193,14 @@ def _create_safe_sentiment_analyst(llm):
                 state.get("company_of_interest"),
                 exc,
             )
+            fallback_report = (
+                "Sentiment analysis partially available. StockTwits and Reddit data "
+                "could not be fetched for this event market topic. Analysis is based "
+                f"on available sources only.\n\nError detail: {str(exc)[:200]}"
+            )
             return {
-                "messages": state.get("messages", []),
-                "sentiment_report": (
-                    "Sentiment analysis partially available. StockTwits and Reddit data "
-                    "could not be fetched for this event market topic. Analysis is based "
-                    f"on available sources only.\n\nError detail: {str(exc)[:200]}"
-                ),
+                "messages": [AIMessage(content=fallback_report)],
+                "sentiment_report": fallback_report,
             }
 
     return safe_node
@@ -219,12 +221,13 @@ def _create_safe_news_analyst(llm):
                 state.get("company_of_interest"),
                 exc,
             )
+            fallback_report = (
+                "News analysis could not be completed. "
+                f"Error: {str(exc)[:200]}"
+            )
             return {
-                "messages": state.get("messages", []),
-                "news_report": (
-                    "News analysis could not be completed. "
-                    f"Error: {str(exc)[:200]}"
-                ),
+                "messages": [AIMessage(content=fallback_report)],
+                "news_report": fallback_report,
             }
 
     return safe_node
