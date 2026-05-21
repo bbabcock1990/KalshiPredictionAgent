@@ -14,6 +14,7 @@ from tradingagents.agents.utils.news_data_tools import get_global_news, get_news
 
 from ..kalshi.models import Market, OrderbookSnapshot
 from .social_media import fetch_social_media_signals
+from .speech_analysis import get_speech_frequency as _get_speech_frequency
 
 # Module-level context — set before each graph run via set_context()
 _context: dict = {}
@@ -107,6 +108,12 @@ def get_event_orderbook(ticker: str) -> str:
 
 
 @tool
+def get_speech_frequency(person: str, keyword: str, lookback_days: int = 180) -> str:
+    """Analyze how frequently a keyword appears in a public figure's recent speeches and statements."""
+    return _get_speech_frequency(person, keyword, lookback_days)
+
+
+@tool
 def get_social_media_signals(topic: str) -> str:
     """Fetch recent Truth Social, X/Twitter, and Reddit signals relevant to a market topic."""
     return fetch_social_media_signals(get_current_market_topic(topic))
@@ -120,6 +127,7 @@ __all__ = [
     "get_current_market_topic",
     "get_event_market_data",
     "get_event_orderbook",
+    "get_speech_frequency",
     "get_social_media_signals",
     "get_news",
     "get_global_news",
