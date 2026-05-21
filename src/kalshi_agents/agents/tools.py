@@ -3,6 +3,7 @@
 Combines:
   - Our Kalshi market/orderbook tools (pre-loaded via set_context())
   - TradingAgents' get_news / get_global_news (via yfinance Search)
+  - Social media fetchers for political and behavioral markets
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from tradingagents.agents.utils.news_data_tools import get_global_news, get_news
 
 from ..kalshi.models import Market, OrderbookSnapshot
 from .events_calendar import get_upcoming_events as _get_upcoming_events
+from .social_media import fetch_social_media_signals
+from .speech_analysis import get_speech_frequency as _get_speech_frequency
 
 # Module-level context — set before each graph run via set_context()
 _context: dict = {}
@@ -46,6 +49,14 @@ def build_news_queries(market: Market) -> list[str]:
     if len(queries) < 3:
         queries.append("US economy monetary policy outlook")
     return queries[:5]
+
+
+def get_current_market_topic(fallback: str = "") -> str:
+    """Return the loaded market title when available, otherwise a fallback."""
+    m: Market | None = _context.get("market")
+    if m and m.title:
+        return m.title
+    return fallback
 
 
 @tool
@@ -103,14 +114,29 @@ def get_upcoming_events(topic: str, days_ahead: int = 30) -> str:
     return _get_upcoming_events(topic, days_ahead)
 
 
+@tool
+def get_speech_frequency(person: str, keyword: str, lookback_days: int = 180) -> str:
+    """Analyze how frequently a keyword appears in a public figure's recent speeches and statements."""
+    return _get_speech_frequency(person, keyword, lookback_days)
+
+
+@tool
+def get_social_media_signals(topic: str) -> str:
+    """Fetch recent Truth Social, X/Twitter, and Reddit signals relevant to a market topic."""
+    return fetch_social_media_signals(get_current_market_topic(topic))
+
+
 # Re-export TA's tools so they're importable from this module
 __all__ = [
     "set_context",
     "clear_context",
     "build_news_queries",
+    "get_current_market_topic",
     "get_event_market_data",
     "get_event_orderbook",
     "get_upcoming_events",
+    "get_speech_frequency",
+    "get_social_media_signals",
     "get_news",
     "get_global_news",
 ]
