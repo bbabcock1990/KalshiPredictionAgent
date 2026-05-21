@@ -455,11 +455,25 @@ class KalshiTradingGraph:
         self.quick_thinking_llm = quick_client.get_llm()
 
         # Tool nodes — combine our Kalshi tools with TA's news tools
+        market_tools = [get_event_market_data, get_event_orderbook]
+        if self.config.get("enable_event_calendar", True):
+            market_tools.append(get_upcoming_events)
+
+        social_tools = [get_news, get_global_news]
+        if self.config.get("enable_social_media", True):
+            social_tools.insert(0, get_social_media_signals)
+
+        fundamentals_tools = [get_global_news]
+        if self.config.get("enable_event_calendar", True):
+            fundamentals_tools.append(get_upcoming_events)
+        if self.config.get("enable_speech_analysis", True):
+            fundamentals_tools.append(get_speech_frequency)
+
         tool_nodes = {
-            "market": ToolNode([get_event_market_data, get_event_orderbook, get_upcoming_events]),
-            "social": ToolNode([get_social_media_signals, get_news, get_global_news]),
+            "market": ToolNode(market_tools),
+            "social": ToolNode(social_tools),
             "news": ToolNode([get_news, get_global_news]),
-            "fundamentals": ToolNode([get_global_news, get_upcoming_events, get_speech_frequency]),
+            "fundamentals": ToolNode(fundamentals_tools),
         }
 
         # Build graph with event-market factories

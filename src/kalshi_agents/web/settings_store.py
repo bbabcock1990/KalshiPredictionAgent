@@ -18,6 +18,13 @@ DEFAULTS: dict[str, Any] = {
     "llm_provider": "github-copilot",
     "llm_model": "gpt-4o-mini",
     "backend_url": "http://localhost:4141/v1",
+    # Data sources
+    "twitter_bearer_token": "",
+    "newsapi_key": "",
+    "fred_api_key": "",
+    "enable_social_media": True,
+    "enable_speech_analysis": True,
+    "enable_event_calendar": True,
     # Risk
     "bankroll_usd": 1000.0,
     "max_stake_pct": 0.05,
