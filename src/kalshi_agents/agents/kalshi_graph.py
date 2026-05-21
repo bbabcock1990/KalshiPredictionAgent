@@ -26,10 +26,8 @@ from tradingagents.agents import (
     create_conservative_debator,
     create_msg_delete,
     create_neutral_debator,
-    create_news_analyst,
     create_portfolio_manager,
     create_research_manager,
-    create_sentiment_analyst,
     create_trader,
 )
 from tradingagents.agents.utils.agent_states import (
@@ -152,6 +150,86 @@ Event topic: {topic}. Kalshi ticker: {ticker}. Date: {state['trade_date']}."""
     return node
 
 
+def _is_external_fetch_error(exc: Exception) -> bool:
+    """Return whether an exception looks like an external social/news fetch failure."""
+    parts = [str(exc)]
+    current = exc.__cause__ or exc.__context__
+    while current is not None:
+        parts.append(str(current))
+        current = current.__cause__ or current.__context__
+
+    error_text = " ".join(parts).lower()
+    return any(
+        keyword in error_text
+        for keyword in (
+            "url",
+            "control character",
+            "encode",
+            "stocktwits",
+            "reddit",
+            "urlopen",
+            "invalid url",
+            "http",
+        )
+    )
+
+
+def _create_safe_sentiment_analyst(llm):
+    """Wrap TA's sentiment analyst so non-stock topics do not crash the pipeline."""
+    from tradingagents.agents import create_sentiment_analyst
+
+    base_node = create_sentiment_analyst(llm)
+
+    def safe_node(state) -> dict:
+        try:
+            return base_node(state)
+        except Exception as exc:
+            if not _is_external_fetch_error(exc):
+                raise
+
+            logger.warning(
+                "Sentiment analyst external fetch failed for %r: %s. Falling back to partial sentiment data.",
+                state.get("company_of_interest"),
+                exc,
+            )
+            return {
+                "messages": state.get("messages", []),
+                "sentiment_report": (
+                    "Sentiment analysis partially available. StockTwits and Reddit data "
+                    "could not be fetched for this event market topic. Analysis is based "
+                    f"on available sources only.\n\nError detail: {str(exc)[:200]}"
+                ),
+            }
+
+    return safe_node
+
+
+def _create_safe_news_analyst(llm):
+    """Wrap TA's news analyst so upstream fetch failures degrade gracefully."""
+    from tradingagents.agents import create_news_analyst
+
+    base_node = create_news_analyst(llm)
+
+    def safe_node(state) -> dict:
+        try:
+            return base_node(state)
+        except Exception as exc:
+            logger.warning(
+                "News analyst failed for %r: %s",
+                state.get("company_of_interest"),
+                exc,
+            )
+            return {
+                "messages": state.get("messages", []),
+                "news_report": (
+                    "News analysis could not be completed. "
+                    f"Error: {str(exc)[:200]}"
+                ),
+            }
+
+    return safe_node
+
+
 # ---------------------------------------------------------------------------
 # YES / NO researchers (adapted from bull/bear)
 # ---------------------------------------------------------------------------
@@ -261,8 +339,8 @@ class KalshiGraphSetup(GraphSetup):
 
         analyst_factories = {
             "market": lambda: _create_event_microstructure_analyst(self.quick_thinking_llm),
-            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
-            "news": lambda: create_news_analyst(self.quick_thinking_llm),
+            "social": lambda: _create_safe_sentiment_analyst(self.quick_thinking_llm),
+            "news": lambda: _create_safe_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: _create_event_base_rate_analyst(self.quick_thinking_llm),
         }
 
