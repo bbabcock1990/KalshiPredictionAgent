@@ -1,6 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
-from kalshi_agents.agents.kalshi_graph import KalshiTradingGraph
+import pytest
+
+from kalshi_agents.agents.kalshi_graph import (
+    KalshiTradingGraph,
+    _create_safe_news_analyst,
+    _create_safe_sentiment_analyst,
+)
 from kalshi_agents.kalshi.models import Market
 
 
@@ -33,3 +39,54 @@ def test_build_market_context_keeps_kalshi_ticker_visible():
 
     assert "Question: Will the Fed cut rates?" in context
     assert "Kalshi ticker: KXFEDDECISION-28JAN-H0" in context
+
+
+def test_safe_sentiment_analyst_handles_url_errors(monkeypatch):
+    def fake_factory(_llm):
+        def node(_state):
+            raise ValueError(
+                "URL can't contain control characters: /api/2/streams/symbol/WHO WILL TIME NAME AS PERSON OF THE DECADE?.json"
+            )
+
+        return node
+
+    monkeypatch.setattr("tradingagents.agents.create_sentiment_analyst", fake_factory)
+
+    state = {
+        "messages": [("human", "context")],
+        "company_of_interest": "Who will TIME name as Person of the Decade?",
+    }
+    result = _create_safe_sentiment_analyst(None)(state)
+
+    assert result["messages"] == state["messages"]
+    assert "Sentiment analysis partially available." in result["sentiment_report"]
+    assert "StockTwits and Reddit data could not be fetched" in result["sentiment_report"]
+
+
+def test_safe_sentiment_analyst_reraises_non_url_errors(monkeypatch):
+    def fake_factory(_llm):
+        def node(_state):
+            raise RuntimeError("llm output parse failed")
+
+        return node
+
+    monkeypatch.setattr("tradingagents.agents.create_sentiment_analyst", fake_factory)
+
+    with pytest.raises(RuntimeError, match="llm output parse failed"):
+        _create_safe_sentiment_analyst(None)({"messages": []})
+
+
+def test_safe_news_analyst_returns_fallback_report(monkeypatch):
+    def fake_factory(_llm):
+        def node(_state):
+            raise RuntimeError("news provider timeout")
+
+        return node
+
+    monkeypatch.setattr("tradingagents.agents.create_news_analyst", fake_factory)
+
+    result = _create_safe_news_analyst(None)({"messages": [("human", "context")]})
+
+    assert result["messages"] == [("human", "context")]
+    assert "News analysis could not be completed." in result["news_report"]
+    assert "news provider timeout" in result["news_report"]
