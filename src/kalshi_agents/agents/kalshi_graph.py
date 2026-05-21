@@ -50,10 +50,12 @@ from .base import AgentReport
 from .tools import (
     build_news_queries,
     clear_context,
+    get_current_market_topic,
     get_event_market_data,
     get_event_orderbook,
     get_global_news,
     get_news,
+    get_social_media_signals,
     set_context,
 )
 
@@ -100,16 +102,18 @@ The event contract ticker is: {ticker}. Analysis date: {state['trade_date']}."""
 
 
 def _create_event_public_signal_analyst(llm):
-    """Pre-fetches Kalshi market data + news and produces a public-signal report."""
+    """Pre-fetches market, news, and social signals for a public-signal report."""
 
     def node(state) -> dict:
         ticker = state["company_of_interest"]
         trade_date = state["trade_date"]
         market_data = get_event_market_data.func(ticker)
         orderbook_data = get_event_orderbook.func(ticker)
+        social_topic = get_current_market_topic(ticker)
 
-        # Pre-fetch news via TA's get_global_news
+        # Pre-fetch news and social media context.
         news_block = get_global_news.func(trade_date)
+        social_block = get_social_media_signals.func(social_topic)
 
         system_message = f"""You are a public-signal analyst for event markets. Assess the consensus \
 view on this binary event contract by analyzing all available signals.
@@ -126,17 +130,22 @@ view on this binary event contract by analyzing all available signals.
 {news_block}
 </recent_news>
 
+<social_media>
+{social_block}
+</social_media>
+
 Analyze:
 1. What the current market price implies about consensus probability
 2. Whether volume/OI suggest informed or uninformed pricing
 3. Any signals from the orderbook about directional conviction
 4. What the recent news tells you about the likely outcome
-5. What external data sources (polls, forecasts, betting markets, official data) \
+5. What recent social media activity by relevant public figures or communities suggests
+6. What external data sources (polls, forecasts, betting markets, official data) \
 might inform this question — note what you know and flag uncertainty
-6. Overall public-signal assessment: is the market price likely efficient, \
+7. Overall public-signal assessment: is the market price likely efficient, \
 too high, or too low?
 
-Event contract ticker: {ticker}. Date: {trade_date}."""
+Event contract ticker: {ticker}. Topic: {social_topic}. Date: {trade_date}."""
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_message),
@@ -522,7 +531,7 @@ class KalshiTradingGraph:
         # Tool nodes — combine our Kalshi tools with TA's news tools
         tool_nodes = {
             "market": ToolNode([get_event_market_data, get_event_orderbook]),
-            "social": ToolNode([get_news, get_global_news]),
+            "social": ToolNode([get_social_media_signals, get_news, get_global_news]),
             "news": ToolNode([get_news, get_global_news]),
             "fundamentals": ToolNode([get_global_news]),
         }
