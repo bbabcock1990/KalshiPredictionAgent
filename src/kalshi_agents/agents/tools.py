@@ -13,6 +13,7 @@ from langchain_core.tools import tool
 from tradingagents.agents.utils.news_data_tools import get_global_news, get_news
 
 from ..kalshi.models import Market, OrderbookSnapshot
+from .events_calendar import get_upcoming_events as _get_upcoming_events
 from .social_media import fetch_social_media_signals
 from .speech_analysis import get_speech_frequency as _get_speech_frequency
 
@@ -108,6 +109,12 @@ def get_event_orderbook(ticker: str) -> str:
 
 
 @tool
+def get_upcoming_events(topic: str, days_ahead: int = 30) -> str:
+    """Get upcoming scheduled events relevant to a market topic. Covers FOMC meetings, BLS releases, sports schedules, and political events."""
+    return _get_upcoming_events(topic, days_ahead)
+
+
+@tool
 def get_speech_frequency(person: str, keyword: str, lookback_days: int = 180) -> str:
     """Analyze how frequently a keyword appears in a public figure's recent speeches and statements."""
     return _get_speech_frequency(person, keyword, lookback_days)
@@ -127,6 +134,7 @@ __all__ = [
     "get_current_market_topic",
     "get_event_market_data",
     "get_event_orderbook",
+    "get_upcoming_events",
     "get_speech_frequency",
     "get_social_media_signals",
     "get_news",

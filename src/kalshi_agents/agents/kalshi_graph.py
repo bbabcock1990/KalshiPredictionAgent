@@ -53,6 +53,7 @@ from .tools import (
     get_event_orderbook,
     get_global_news,
     get_news,
+    get_upcoming_events,
     get_speech_frequency,
     get_social_media_signals,
     set_context,
@@ -89,10 +90,12 @@ Focus on:
 - Volume and open interest (high = more informed pricing)
 - Orderbook depth and imbalance between YES and NO sides
 - Time to market close and implications for pricing
+- Upcoming scheduled events that could change liquidity, timing, or resolution expectations
 
 IMPORTANT: This is a binary event contract, not a stock. The YES price is \
 the market's implied probability that the event occurs. Focus on what the \
 market structure tells you about pricing confidence and potential mispricings.
+Use the get_upcoming_events tool to understand the event calendar around the market.
 
 The event contract ticker is: {ticker}. Analysis date: {state['trade_date']}."""
 
@@ -101,7 +104,7 @@ The event contract ticker is: {ticker}. Analysis date: {state['trade_date']}."""
             MessagesPlaceholder(variable_name="messages"),
         ])
 
-        tools = [get_event_market_data, get_event_orderbook]
+        tools = [get_event_market_data, get_event_orderbook, get_upcoming_events]
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state)
         return {"messages": [result], "market_report": result.content}
@@ -125,10 +128,12 @@ Focus on:
 - For policy events: institutional behavior patterns and stated positions
 - Structural factors that constrain the range of outcomes
 - How the current situation compares to historical precedents
+- What the scheduled event agenda and timing imply for historical comparisons
 
 Use the get_global_news tool to find recent economic data releases and analysis. \
 You can also use get_news with relevant index tickers (e.g., "^TNX" for Treasury \
-yields, "^GSPC" for S&P 500) to get macro-relevant market news. Use the \
+yields, "^GSPC" for S&P 500) to get macro-relevant market news.
+Use the get_upcoming_events tool to understand the event calendar and agenda. Use the \
 get_speech_frequency tool to look up how often a person has mentioned a \
 specific keyword in speeches and statements when the market depends on what \
 someone is likely to say.
@@ -139,7 +144,7 @@ Event topic: {topic}. Kalshi ticker: {ticker}. Date: {state['trade_date']}."""
             ("system", system_message),
             MessagesPlaceholder(variable_name="messages"),
         ])
-        tools = [get_news, get_global_news, get_speech_frequency]
+        tools = [get_news, get_global_news, get_upcoming_events, get_speech_frequency]
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state)
         return {"messages": [result], "fundamentals_report": result.content}
@@ -451,10 +456,10 @@ class KalshiTradingGraph:
 
         # Tool nodes — combine our Kalshi tools with TA's news tools
         tool_nodes = {
-            "market": ToolNode([get_event_market_data, get_event_orderbook]),
+            "market": ToolNode([get_event_market_data, get_event_orderbook, get_upcoming_events]),
             "social": ToolNode([get_social_media_signals, get_news, get_global_news]),
             "news": ToolNode([get_news, get_global_news]),
-            "fundamentals": ToolNode([get_global_news, get_speech_frequency]),
+            "fundamentals": ToolNode([get_global_news, get_upcoming_events, get_speech_frequency]),
         }
 
         # Build graph with event-market factories
