@@ -12,6 +12,7 @@ from langchain_core.tools import tool
 from tradingagents.agents.utils.news_data_tools import get_global_news, get_news
 
 from ..kalshi.models import Market, OrderbookSnapshot
+from .events_calendar import get_upcoming_events as _get_upcoming_events
 
 # Module-level context — set before each graph run via set_context()
 _context: dict = {}
@@ -96,6 +97,12 @@ def get_event_orderbook(ticker: str) -> str:
     return "\n".join(lines)
 
 
+@tool
+def get_upcoming_events(topic: str, days_ahead: int = 30) -> str:
+    """Get upcoming scheduled events relevant to a market topic. Covers FOMC meetings, BLS releases, sports schedules, and political events."""
+    return _get_upcoming_events(topic, days_ahead)
+
+
 # Re-export TA's tools so they're importable from this module
 __all__ = [
     "set_context",
@@ -103,6 +110,7 @@ __all__ = [
     "build_news_queries",
     "get_event_market_data",
     "get_event_orderbook",
+    "get_upcoming_events",
     "get_news",
     "get_global_news",
 ]
