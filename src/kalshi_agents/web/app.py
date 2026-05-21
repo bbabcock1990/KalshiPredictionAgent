@@ -335,40 +335,101 @@ elif page == "🏠 Dashboard":
                         found = r.json().get("markets", [])
                     else:
                         # Search by events (supports category/keyword)
+                        kw = search_text.strip().lower()
                         params = {"status": "open", "limit": 100}
-                        r = httpx.get(f"{base_url}/events", params=params, timeout=15)
-                        events = r.json().get("events", [])
 
-                        # Filter by category
-                        if selected_cat != "All":
-                            events = [
-                                e for e in events
-                                if (e.get("category") or "").lower() == selected_cat.lower()
-                            ]
-
-                        # Filter by keyword
-                        if search_text:
-                            kw = search_text.lower()
-                            events = [
-                                e for e in events
-                                if kw in (e.get("title") or "").lower()
-                                or kw in (e.get("event_ticker") or "").lower()
-                            ]
-
-                        # Fetch markets for matching events
-                        found = []
-                        for ev in events[:15]:
-                            et = ev.get("event_ticker")
-                            if not et:
-                                continue
+                        def _fetch_event_markets(event_ticker: str) -> list[dict]:
                             mr = httpx.get(
                                 f"{base_url}/markets",
-                                params={"event_ticker": et, "status": "open", "limit": 10},
+                                params={"event_ticker": event_ticker, "status": "open", "limit": 10},
                                 timeout=10,
                             )
-                            found.extend(mr.json().get("markets", []))
-                            if len(found) >= 30:
-                                break
+                            mr.raise_for_status()
+                            return mr.json().get("markets", [])
+
+                        found = []
+                        if kw:
+                            with st.spinner("Searching markets..."):
+                                events = []
+                                max_pages = 5
+                                for _ in range(max_pages):
+                                    r = httpx.get(f"{base_url}/events", params=params, timeout=15)
+                                    r.raise_for_status()
+                                    data = r.json()
+                                    page_events = data.get("events", [])
+                                    if not page_events:
+                                        break
+                                    events.extend(page_events)
+                                    cursor = data.get("cursor")
+                                    if not cursor:
+                                        break
+                                    params["cursor"] = cursor
+
+                                if selected_cat != "All":
+                                    events = [
+                                        e for e in events
+                                        if (e.get("category") or "").lower() == selected_cat.lower()
+                                    ]
+
+                                matching_event_tickers = {
+                                    e.get("event_ticker")
+                                    for e in events
+                                    if kw in (e.get("title") or "").lower()
+                                    or kw in (e.get("event_ticker") or "").lower()
+                                }
+                                matching_events = [
+                                    e
+                                    for e in events
+                                    if e.get("event_ticker") in matching_event_tickers
+                                ]
+                                fallback_events = [
+                                    e
+                                    for e in events
+                                    if e.get("event_ticker") not in matching_event_tickers
+                                ]
+
+                                for ev in matching_events:
+                                    et = ev.get("event_ticker")
+                                    if not et:
+                                        continue
+                                    found.extend(_fetch_event_markets(et))
+                                    if len(found) >= 30:
+                                        break
+
+                                if len(found) < 30:
+                                    for ev in fallback_events:
+                                        et = ev.get("event_ticker")
+                                        if not et:
+                                            continue
+                                        markets = [
+                                            m
+                                            for m in _fetch_event_markets(et)
+                                            if kw in (m.get("title") or "").lower()
+                                            or kw in (m.get("ticker") or "").lower()
+                                        ]
+                                        if not markets:
+                                            continue
+                                        found.extend(markets)
+                                        if len(found) >= 30:
+                                            break
+                        else:
+                            r = httpx.get(f"{base_url}/events", params=params, timeout=15)
+                            r.raise_for_status()
+                            events = r.json().get("events", [])
+
+                            if selected_cat != "All":
+                                events = [
+                                    e for e in events
+                                    if (e.get("category") or "").lower() == selected_cat.lower()
+                                ]
+
+                            for ev in events[:15]:
+                                et = ev.get("event_ticker")
+                                if not et:
+                                    continue
+                                found.extend(_fetch_event_markets(et))
+                                if len(found) >= 30:
+                                    break
 
                     if not found:
                         st.warning("No open markets found. Try a different filter.")
